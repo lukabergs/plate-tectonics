@@ -13,6 +13,12 @@ int writeImageGray(const char* filename, int width, int height, float *heightmap
 
 int writeImageColors(const char* filename, int width, int height, float *heightmap, const char* title);
 
+int writeImageRgb(const char* filename, int width, int height, const png_byte* rgb, const char* title);
+
+void renderImageGrayRgb(int width, int height, float* heightmap, std::vector<png_byte>& rgb);
+
+void renderImageColorsRgb(int width, int height, float* heightmap, std::vector<png_byte>& rgb);
+
 int readImageNormalized(const char* filename, std::vector<float>& heightmap, int& width, int& height);
 
 #endif

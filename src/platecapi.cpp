@@ -109,6 +109,11 @@ void platec_api_load_heightmap(void* pointer, const float* normalized_heightmap,
     litho->importNormalizedHeightMap(normalized_heightmap, sea_level);
 }
 
+uint32_t platec_api_get_plate_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlateCount();
+}
+
 uint32_t lithosphere_getMapWidth(void* object) {
     return static_cast<lithosphere*>(object)->getWidth();
 }

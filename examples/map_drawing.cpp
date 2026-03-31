@@ -19,6 +19,89 @@ inline void setColor(png_byte *ptr, png_byte r, png_byte g, png_byte b)
     ptr[2] = b;
 }
 
+int writeImageRgb(const char* filename, int width, int height, const png_byte* rgb, const char* title)
+{
+    volatile int code = 0;
+    FILE * volatile fp = nullptr;
+    png_structp volatile png_ptr = nullptr;
+    png_infop volatile info_ptr = nullptr;
+
+#ifdef _WIN32
+    FILE* fp_temp = nullptr;
+    errno_t err = fopen_s(&fp_temp, filename, "wb");
+    fp = fp_temp;
+    if (err != 0 || fp == nullptr) {
+#else
+    fp = fopen(filename, "wb");
+    if (fp == nullptr) {
+#endif
+        fprintf(stderr, "Could not open file %s for writing\n", filename);
+        code = 1;
+        goto finalise;
+    }
+
+    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (png_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate write struct\n");
+        code = 1;
+        goto finalise;
+    }
+
+    info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate info struct\n");
+        code = 1;
+        goto finalise;
+    }
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4611)
+#endif
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Error during png creation\n");
+        code = 1;
+        goto finalise;
+    }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+    png_init_io(png_ptr, fp);
+    png_set_IHDR(png_ptr, info_ptr, width, height,
+                 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+    if (title != nullptr) {
+        png_text title_text;
+        title_text.compression = PNG_TEXT_COMPRESSION_NONE;
+        title_text.key = const_cast<char*>("Title");
+        title_text.text = const_cast<char*>(title);
+        png_set_text(png_ptr, info_ptr, &title_text, 1);
+    }
+
+    png_write_info(png_ptr, info_ptr);
+
+    for (int y = 0; y < height; ++y) {
+        png_write_row(png_ptr, const_cast<png_bytep>(rgb + static_cast<size_t>(y) * static_cast<size_t>(width) * 3U));
+    }
+    png_write_end(png_ptr, nullptr);
+
+finalise:
+    if (fp != nullptr) fclose(fp);
+    if (png_ptr != nullptr) {
+        if (info_ptr != nullptr) {
+            png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
+        }
+        {
+            png_structp png_ptr_nv = png_ptr;
+            png_destroy_write_struct(&png_ptr_nv, (png_infopp)nullptr);
+        }
+    }
+
+    return code;
+}
+
 int writeImage(const char* filename, int width, int height, float *heightmap, const char* title,
                void (drawFunction)(png_structp&, png_bytep&, int, int, float*))
 {
@@ -195,6 +278,27 @@ void drawGrayImage(png_structp& png_ptr, png_bytep& row, int width, int height, 
     }
 }
 
+void renderImageGrayRgb(int width, int height, float* heightmap, std::vector<png_byte>& rgb)
+{
+    rgb.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3U);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float h = heightmap[y * width + x];
+            float res = 0.0f;
+            if (h <= 0.0f) {
+                res = 0.0f;
+            } else if (h >= 1.0f) {
+                res = 255.0f;
+            } else {
+                res = h * 255.0f;
+            }
+
+            png_byte* ptr = &rgb[(static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3U];
+            setGray(ptr, static_cast<int>(res));
+        }
+    }
+}
+
 void drawColorsImage(png_structp& png_ptr, png_bytep& row, int width, int height, float *heightmap)
 {
     float q15 = find_value_for_quantile(0.15f, heightmap, width * height);
@@ -242,6 +346,57 @@ void drawColorsImage(png_structp& png_ptr, png_bytep& row, int width, int height
             gradient(&(row[x*3]), 91, 28, 13, 51, 0, 4, h, q99, 1.0f);
         }
         png_write_row(png_ptr, row);
+    }
+}
+
+void renderImageColorsRgb(int width, int height, float* heightmap, std::vector<png_byte>& rgb)
+{
+    rgb.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3U);
+
+    const float q15 = find_value_for_quantile(0.15f, heightmap, width * height);
+    const float q70 = find_value_for_quantile(0.70f, heightmap, width * height);
+    const float q75 = find_value_for_quantile(0.75f, heightmap, width * height);
+    const float q90 = find_value_for_quantile(0.90f, heightmap, width * height);
+    const float q95 = find_value_for_quantile(0.95f, heightmap, width * height);
+    const float q99 = find_value_for_quantile(0.99f, heightmap, width * height);
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float h = heightmap[y * width + x];
+            png_byte* ptr = &rgb[(static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3U];
+
+            if (h < q15) {
+                gradient(ptr, 0, 0, 255, 0, 20, 200, h, 0.0f, q15);
+                continue;
+            }
+
+            if (h < q70) {
+                gradient(ptr, 0, 20, 200, 50, 80, 225, h, q15, q70);
+                continue;
+            }
+
+            if (h < q75) {
+                gradient(ptr, 50, 80, 225, 135, 237, 235, h, q70, q75);
+                continue;
+            }
+
+            if (h < q90) {
+                gradient(ptr, 88, 173, 49, 218, 226, 58, h, q75, q90);
+                continue;
+            }
+
+            if (h < q95) {
+                gradient(ptr, 218, 226, 58, 251, 252, 42, h, q90, q95);
+                continue;
+            }
+
+            if (h < q99) {
+                gradient(ptr, 251, 252, 42, 91, 28, 13, h, q95, q99);
+                continue;
+            }
+
+            gradient(ptr, 91, 28, 13, 51, 0, 4, h, q99, 1.0f);
+        }
     }
 }
 
