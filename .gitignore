@@ -35,6 +35,12 @@
 # Build directory (contains all CMake generated files)
 build/
 
+# Image directory
+img/
+
+# VS directory
+.vs/
+
 *.swp
 venv
 

@@ -1,6 +1,7 @@
 #include "map_drawing.hpp"
 #include "utils.hpp"
 #include <stdexcept>
+#include <vector>
 
 using namespace std;
 
@@ -252,4 +253,143 @@ int writeImageGray(const char* filename, int width, int height, float *heightmap
 int writeImageColors(const char* filename, int width, int height, float *heightmap, const char* title)
 {
     return writeImage(filename, width, height, heightmap, title, drawColorsImage);
+}
+
+int readImageNormalized(const char* filename, std::vector<float>& heightmap, int& width, int& height)
+{
+    volatile int code = 1;
+    FILE * volatile fp = nullptr;
+    png_structp volatile png_ptr = nullptr;
+    png_infop volatile info_ptr = nullptr;
+    png_bytep volatile image_data = nullptr;
+    png_bytep* volatile rows = nullptr;
+    png_uint_32 png_width = 0;
+    png_uint_32 png_height = 0;
+    int bit_depth = 0;
+    int color_type = 0;
+    png_size_t row_bytes = 0;
+
+#ifdef _WIN32
+    FILE* fp_temp = nullptr;
+    errno_t err = fopen_s(&fp_temp, filename, "rb");
+    fp = fp_temp;
+    if (err != 0 || fp == nullptr) {
+#else
+    fp = fopen(filename, "rb");
+    if (fp == nullptr) {
+#endif
+        fprintf(stderr, "Could not open file %s for reading\n", filename);
+        goto finalise;
+    }
+
+    png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (png_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate read struct\n");
+        goto finalise;
+    }
+
+    info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate info struct\n");
+        goto finalise;
+    }
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4611)
+#endif
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Error during png read\n");
+        goto finalise;
+    }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+    png_init_io(png_ptr, fp);
+    png_read_info(png_ptr, info_ptr);
+
+    png_width = png_get_image_width(png_ptr, info_ptr);
+    png_height = png_get_image_height(png_ptr, info_ptr);
+    bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+    color_type = png_get_color_type(png_ptr, info_ptr);
+
+    if (bit_depth == 16) {
+        png_set_strip_16(png_ptr);
+    }
+    if (color_type == PNG_COLOR_TYPE_PALETTE) {
+        png_set_palette_to_rgb(png_ptr);
+    }
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) {
+        png_set_expand_gray_1_2_4_to_8(png_ptr);
+    }
+    if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
+        png_set_tRNS_to_alpha(png_ptr);
+    }
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+        png_set_gray_to_rgb(png_ptr);
+    }
+    if ((color_type & PNG_COLOR_MASK_ALPHA) != 0 || png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
+        png_set_strip_alpha(png_ptr);
+    }
+
+    png_read_update_info(png_ptr, info_ptr);
+
+    row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+    image_data = static_cast<png_bytep>(malloc(row_bytes * png_height));
+    rows = static_cast<png_bytep*>(malloc(sizeof(png_bytep) * png_height));
+
+    if (image_data == nullptr || rows == nullptr) {
+        fprintf(stderr, "Could not allocate memory for image data\n");
+        goto finalise;
+    }
+
+    for (png_uint_32 y = 0; y < png_height; ++y) {
+        rows[y] = image_data + y * row_bytes;
+    }
+
+    {
+        png_structp png_ptr_nv = png_ptr;
+        png_infop info_ptr_nv = info_ptr;
+        png_bytep* rows_nv = rows;
+        png_read_image(png_ptr_nv, rows_nv);
+        png_read_end(png_ptr_nv, info_ptr_nv);
+    }
+
+    width = static_cast<int>(png_width);
+    height = static_cast<int>(png_height);
+    heightmap.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+
+    for (int y = 0; y < height; ++y) {
+        const png_bytep row = rows[y];
+        for (int x = 0; x < width; ++x) {
+            const png_bytep ptr = &(row[x * 3]);
+            const float luminance =
+                (0.2126f * ptr[0] + 0.7152f * ptr[1] + 0.0722f * ptr[2]) / 255.0f;
+            heightmap[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] =
+                luminance;
+        }
+    }
+
+    code = 0;
+
+finalise:
+    if (fp != nullptr) fclose(fp);
+    if (rows != nullptr) free(const_cast<png_bytep*>(rows));
+    if (image_data != nullptr) free(const_cast<png_bytep>(image_data));
+    if (png_ptr != nullptr) {
+        if (info_ptr != nullptr) {
+            png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
+        }
+        {
+            png_structp png_ptr_nv = png_ptr;
+            png_destroy_read_struct(&png_ptr_nv, (png_infopp)nullptr, (png_infopp)nullptr);
+        }
+    }
+    if (code != 0) {
+        heightmap.clear();
+        width = 0;
+        height = 0;
+    }
+    return code;
 }

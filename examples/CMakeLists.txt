@@ -12,4 +12,5 @@ set(CMAKE_FIND_FRAMEWORK LAST)
 find_package(PNG REQUIRED)
 
 target_include_directories(simulation PRIVATE ../src ${PNG_INCLUDE_DIRS})
+target_compile_definitions(simulation PRIVATE PLATE_TECTONICS_ROOT="${CMAKE_SOURCE_DIR}")
 target_link_libraries(simulation PRIVATE PlateTectonics PNG::PNG)
