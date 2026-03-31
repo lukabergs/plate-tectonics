@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d53627fa8896fe483423a0db93bfa915\googletest-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\d223692fa4582b891e70d71a90fc95ca\googletest-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\637b54d8aec5b66c34c3b95136c64b40\googletest-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\dev\plate-tectonics\build-png\_deps\googletest-subbuild\CMakeFiles\googletest-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E2B4A576-C1F4-3EC8-B499-E318C0E3637D}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

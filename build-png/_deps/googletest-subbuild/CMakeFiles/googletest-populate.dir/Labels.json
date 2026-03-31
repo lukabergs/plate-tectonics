@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/googletest-populate"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/637b54d8aec5b66c34c3b95136c64b40/googletest-populate.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d223692fa4582b891e70d71a90fc95ca/googletest-populate-complete.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-build.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-configure.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-download.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-install.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-mkdir.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-patch.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-test.rule"
+		},
+		{
+			"file" : "C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/CMakeFiles/d53627fa8896fe483423a0db93bfa915/googletest-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"googletest-populate"
+		],
+		"name" : "googletest-populate"
+	}
+}

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/dev/plate-tectonics/build-png/_deps/googletest-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
