@@ -76,13 +76,17 @@ void lithosphere::createSlowNoise(float* tmp, const WorldDimension& tmpDim) {
 
 lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_level,
                          uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
-                         float aggr_ratio_rel, uint32_t num_cycles,
-                         uint32_t _max_plates) noexcept(false)
+                         float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
+                         float _erosion_strength, float _crust_rotation_strength,
+                         float _rotation_strength) noexcept(false)
     : hmap(width, height), imap(width, height), prev_imap(width, height), amap(width, height),
       plates(nullptr), plate_areas(_max_plates), plate_indices_found(_max_plates),
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
       erosion_period(_erosion_period), folding_ratio(_folding_ratio), iter_count(0),
       max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
+      erosion_strength(_erosion_strength < 0.0f ? 0.0f : _erosion_strength),
+      crust_rotation_strength(_crust_rotation_strength < 0.0f ? 0.0f : _crust_rotation_strength),
+      rotation_strength(_rotation_strength < 0.0f ? 0.0f : _rotation_strength),
       _worldDimension(width, height), _randsource(seed), _steps(0) {
     if (width < 5 || height < 5) {
         throw runtime_error("Width and height should be >=5");
@@ -299,8 +303,9 @@ void lithosphere::createPlates() {
             }
             // Create plate.
             // MK: The pmap array becomes owned by map, do not delete it
-            plates[i] =
-                new plate(_randsource.next(), pmap, width, height, x0, y0, i, _worldDimension);
+            plates[i] = new plate(_randsource.next(), pmap, width, height, x0, y0, i,
+                                  _worldDimension, erosion_strength,
+                                  crust_rotation_strength, rotation_strength);
         }
 
         iter_count = num_plates + MAX_BUOYANCY_AGE;

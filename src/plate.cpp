@@ -39,6 +39,12 @@ using namespace std;
 
 namespace {
 
+static const float kRiverErosionStrength = 0.04f;
+static const float kErosionRedistributionStrength = 0.18f;
+static const float kReliefNoiseAmplitude = 0.02f;
+static const float kReliefNoiseVariation = 0.04f;
+static const float kErosionFloorOffset = 0.18f;
+
 float wrapped_delta(float point, float center, uint32_t world_size) {
     float delta = point - center;
     const float period = static_cast<float>(world_size);
@@ -65,10 +71,14 @@ float wrap_coordinate(float value, uint32_t world_size) {
 } // namespace
 
 plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t _y,
-             uint32_t plate_age, WorldDimension worldDimension)
+             uint32_t plate_age, WorldDimension worldDimension, float erosion_strength,
+             float crust_rotation_strength, float rotation_strength)
     : _worldDimension(worldDimension), _randsource(seed), map(m, w, h), age_map(w, h),
       _bounds(nullptr), _mass(MassBuilder(m, Dimension(w, h)).build()),
-      _movement(_randsource, worldDimension), _segments(nullptr), _mySegmentCreator(nullptr) {
+      _movement(_randsource, worldDimension, rotation_strength),
+      _erosion_strength(erosion_strength < 0.0f ? 0.0f : erosion_strength),
+      _crust_rotation_strength(crust_rotation_strength < 0.0f ? 0.0f : crust_rotation_strength),
+      _segments(nullptr), _mySegmentCreator(nullptr) {
     const uint32_t plate_area = w * h;
 
     _bounds = new Bounds(worldDimension, FloatPoint(static_cast<float>(_x), static_cast<float>(_y)),
@@ -345,7 +355,7 @@ void plate::flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& 
             }
 
             // Erode this location with the water flow.
-            tmp[index] -= (tmp[index] - lower_bound) * 0.2f;
+            tmp[index] -= (tmp[index] - lower_bound) * kRiverErosionStrength * _erosion_strength;
         }
 
         vector<uint32_t>* v_tmp = sources;
@@ -356,17 +366,22 @@ void plate::flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& 
 }
 
 void plate::erode(float lower_bound) {
+    if (_erosion_strength <= 0.0f) {
+        return;
+    }
+
     vector<uint32_t> sources_data;
     vector<uint32_t>* sources = &sources_data;
+    const float erosion_floor = lower_bound + kErosionFloorOffset * _erosion_strength;
 
     HeightMap tmpHm(map);
-    findRiverSources(lower_bound, sources);
-    flowRivers(lower_bound, sources, tmpHm);
+    findRiverSources(erosion_floor, sources);
+    flowRivers(erosion_floor, sources, tmpHm);
 
-    // Add random noise (10 %) to heightmap.
+    // Keep some local roughness without washing away continental detail.
     for (uint32_t i = 0; i < _bounds->area(); ++i) {
-        float alpha = 0.2f * _randsource.next_float();
-        tmpHm[i] += 0.1f * tmpHm[i] - alpha * tmpHm[i];
+        const float alpha = kReliefNoiseVariation * _erosion_strength * _randsource.next_float();
+        tmpHm[i] += kReliefNoiseAmplitude * _erosion_strength * tmpHm[i] - alpha * tmpHm[i];
         // Clamp to zero to prevent floating point errors from accumulating
         // and causing negative mass values (Issue #30)
         if (tmpHm[i] < 0.0f) {
@@ -376,15 +391,12 @@ void plate::erode(float lower_bound) {
 
     map = tmpHm;
     tmpHm.set_all(0.0f);
-    MassBuilder massBuilder;
-
     for (uint32_t y = 0; y < _bounds->height(); ++y) {
         for (uint32_t x = 0; x < _bounds->width(); ++x) {
             const uint32_t index = y * _bounds->width() + x;
-            massBuilder.addPoint(x, y, map[index]);
             tmpHm[index] += map[index]; // Careful not to overwrite earlier amounts.
 
-            if (map[index] < lower_bound)
+            if (map[index] < erosion_floor)
                 continue;
 
             float w_crust, e_crust, n_crust, s_crust;
@@ -438,13 +450,15 @@ void plate::erode(float lower_bound) {
                 // crust from this peak so that it would be as tall as its
                 // tallest lower neighbour. Thus first step is make ALL
                 // lower neighbours and this point equally tall.
-                tmpHm[w] += (w_diff - min_diff) * (w_crust > 0);
-                tmpHm[e] += (e_diff - min_diff) * (e_crust > 0);
-                tmpHm[n] += (n_diff - min_diff) * (n_crust > 0);
-                tmpHm[s] += (s_diff - min_diff) * (s_crust > 0);
-                tmpHm[index] -= min_diff;
+                const float redistribution_strength =
+                    kErosionRedistributionStrength * _erosion_strength;
+                tmpHm[w] += (w_diff - min_diff) * (w_crust > 0) * redistribution_strength;
+                tmpHm[e] += (e_diff - min_diff) * (e_crust > 0) * redistribution_strength;
+                tmpHm[n] += (n_diff - min_diff) * (n_crust > 0) * redistribution_strength;
+                tmpHm[s] += (s_diff - min_diff) * (s_crust > 0) * redistribution_strength;
+                tmpHm[index] -= min_diff * redistribution_strength;
 
-                min_diff -= diff_sum;
+                min_diff = (min_diff - diff_sum) * redistribution_strength;
 
                 // Spread the remaining crust equally among all lower nbours.
                 min_diff /= 1 + (w_crust > 0) + (e_crust > 0) + (n_crust > 0) + (s_crust > 0);
@@ -455,11 +469,12 @@ void plate::erode(float lower_bound) {
                 tmpHm[s] += min_diff * (s_crust > 0);
                 tmpHm[index] += min_diff;
             } else {
-                float unit = min_diff / diff_sum;
+                float unit = (min_diff * kErosionRedistributionStrength * _erosion_strength) /
+                             diff_sum;
 
                 // Remove all crust from this location making it as tall as
                 // its tallest lower neighbour.
-                tmpHm[index] -= min_diff;
+                tmpHm[index] -= min_diff * kErosionRedistributionStrength * _erosion_strength;
 
                 // Spread all removed crust among all other lower neighbours.
                 tmpHm[w] += unit * (w_diff - min_diff) * (w_crust > 0);
@@ -479,7 +494,7 @@ void plate::erode(float lower_bound) {
     }
 
     map = tmpHm;
-    _mass = massBuilder.build();
+    _mass = MassBuilder(map.raw_data(), Dimension(_bounds->width(), _bounds->height())).build();
 }
 
 void plate::getCollisionInfo(uint32_t wx, uint32_t wy, uint32_t* count, float* ratio) const {
@@ -718,7 +733,10 @@ void plate::rotateCrust(float angle) {
 
 void plate::move() {
     _movement.move();
-    rotateCrust(_movement.rotationAngle());
+    const float crust_rotation_angle = _movement.rotationAngle() * _crust_rotation_strength;
+    if (fabsf(crust_rotation_angle) >= 0.0001f) {
+        rotateCrust(crust_rotation_angle);
+    }
 
     // Location modulations into range [0..world width/height[ are a have to!
     // If left undone SOMETHING WILL BREAK DOWN SOMEWHERE in the code!

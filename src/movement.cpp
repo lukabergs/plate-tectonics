@@ -22,8 +22,10 @@
 #include "plate.hpp"
 #include "utils.hpp"
 
-Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension)
-    : _randsource(randsource), _worldDimension(worldDimension), velocity(1),
+Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension,
+                   float rotation_strength)
+    : _randsource(randsource), _worldDimension(worldDimension),
+      _rotation_strength(rotation_strength), velocity(1),
       rot_dir(static_cast<float>(randsource.next() % 2 ? 1 : -1)), last_rotation_angle(0), dx(0),
       dy(0) {
     const float angle = 2.0f * PI * _randsource.next_float();
@@ -68,7 +70,7 @@ void Movement::move() {
     // Force the radius of the circle to remain fixed by adjusting
     // angular velocity (which depends on plate's velocity).
     uint32_t world_avg_side = (_worldDimension.getWidth() + _worldDimension.getHeight()) / 2;
-    float alpha = rot_dir * velocity / (world_avg_side * 0.33f);
+    float alpha = rot_dir * velocity * _rotation_strength / (world_avg_side * 0.33f);
     float alpha_vel = alpha * velocity;
     last_rotation_angle = alpha_vel * BODY_ROTATION_FACTOR;
     float _cos = cosf(alpha_vel);

@@ -48,7 +48,8 @@ class plate : public IPlate {
     /// @param  _y             Y of height map's left-top corner on world map.
     /// @param  worldDimension Dimension of world map's either side in pixels.
     plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t _y, uint32_t plate_age,
-          WorldDimension worldDimension);
+          WorldDimension worldDimension, float erosion_strength = 1.0f,
+          float crust_rotation_strength = 0.0f, float rotation_strength = 1.0f);
 
     ~plate() override;
 
@@ -300,6 +301,8 @@ class plate : public IPlate {
     IBounds* _bounds;
     Mass _mass;
     Movement _movement;
+    float _erosion_strength;
+    float _crust_rotation_strength;
     ISegments* _segments;
     MySegmentCreator* _mySegmentCreator;
 };

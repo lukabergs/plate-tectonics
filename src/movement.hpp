@@ -50,7 +50,8 @@ class IMovement {
 
 class Movement : public IMovement {
   public:
-    Movement(SimpleRandom randsource, const WorldDimension& worldDimension);
+    Movement(SimpleRandom randsource, const WorldDimension& worldDimension,
+             float rotation_strength = 1.0f);
     void applyFriction(float deformed_mass, float mass);
     void move();
     Platec::FloatVector velocityUnitVector() const override {
@@ -98,6 +99,7 @@ class Movement : public IMovement {
   private:
     SimpleRandom _randsource;
     const WorldDimension _worldDimension;
+    float _rotation_strength;
     float velocity; ///< Plate's velocity.
     float rot_dir;  ///< Direction of rotation: 1 = CCW, -1 = ClockWise.
     float last_rotation_angle; ///< Plate body rotation applied on latest move.

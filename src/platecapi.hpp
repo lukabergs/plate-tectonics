@@ -25,7 +25,9 @@
 
 void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_level,
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
-                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates);
+                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
+                        float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
+                        float rotation_strength = 1.0f);
 
 void platec_api_destroy(void*);
 const uint32_t* platec_api_get_agemap(uint32_t);

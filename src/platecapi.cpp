@@ -40,13 +40,16 @@ static uint32_t last_id = 1;
 
 void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_level,
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
-                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates) {
+                        float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
+                        float erosion_strength, float crust_rotation_strength,
+                        float rotation_strength) {
     /* Miten nykyisen opengl-mainin koodit refaktoroidaan tänne?
      *    parametrien tarkistus, kommentit eli dokumentointi, muuta? */
 
     lithosphere* litho =
         new lithosphere(seed, width, height, sea_level, erosion_period, folding_ratio,
-                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates);
+                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates,
+                        erosion_strength, crust_rotation_strength, rotation_strength);
 
     platec_api_list_elem elem(++last_id, litho);
     lithospheres.push_back(elem);

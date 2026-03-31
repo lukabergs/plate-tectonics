@@ -237,24 +237,24 @@ TEST(Regression, SimulationSeed12345_OutputConsistency) {
     // Rotational motion and jagged divergent growth changed the seeded output materially.
     // Keep both architecture baselines aligned until a fresh ARM64 capture is available.
     HeightmapStats expected_final_arm64 = {
-        1.01104e-05f, // min
-        12.0127f,     // max
-        0.730301f,    // mean
-        0.0832253f,   // median
-        1.32011f,     // std_dev
-        0.0250883f,   // q25
-        1.06956f      // q75
+        0.0254916f,   // min
+        20.2023f,     // max
+        0.853491f,    // mean
+        0.101927f,    // median
+        1.5959f,      // std_dev
+        0.0995488f,   // q25
+        0.688376f     // q75
     };
 
     // Baseline: Windows/Ubuntu x86-64 (MSVC/GCC, AVX2/SSE)
     HeightmapStats expected_final_x86 = {
-        1.01104e-05f, // min
-        12.0127f,     // max
-        0.730301f,    // mean
-        0.0832253f,   // median
-        1.32011f,     // std_dev
-        0.0250883f,   // q25
-        1.06956f      // q75
+        0.0254916f,   // min
+        20.2023f,     // max
+        0.853491f,    // mean
+        0.101927f,    // median
+        1.5959f,      // std_dev
+        0.0995488f,   // q25
+        0.688376f     // q75
     };
 
     // Check initial state (should match on all platforms)

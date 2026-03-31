@@ -82,7 +82,9 @@ class lithosphere {
      */
     lithosphere(long seed, uint32_t width, uint32_t height, float sea_level,
                 uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
-                float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates) noexcept(false);
+                float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
+                float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
+                float rotation_strength = 1.0f) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -178,6 +180,9 @@ class lithosphere {
     uint32_t max_cycles;       ///< Max n:o of times the system'll be restarted.
     uint32_t max_plates;       ///< Number of plates in the initial setting.
     uint32_t num_plates;       ///< Number of plates in the current setting.
+    float erosion_strength;    ///< Scales terrain erosion.
+    float crust_rotation_strength; ///< Scales visible raster rotation.
+    float rotation_strength;   ///< Scales angular plate motion.
 
     vector<vector<plateCollision>> collisions;
     vector<vector<plateCollision>> subductions;

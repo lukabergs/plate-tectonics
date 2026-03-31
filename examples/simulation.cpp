@@ -29,11 +29,14 @@ namespace {
 
 constexpr float kSeaLevel = 0.65f;
 constexpr uint32_t kErosionPeriod = 60;
+constexpr float kDefaultErosionStrength = 1.0f;
 constexpr float kFoldingRatio = 0.02f;
 constexpr uint32_t kAggrOverlapAbs = 1000000;
 constexpr float kAggrOverlapRel = 0.33f;
 constexpr uint32_t kDefaultCycleCount = 2;
 constexpr uint32_t kDefaultPlateCount = 10;
+constexpr float kDefaultRotationStrength = 1.0f;
+constexpr float kDefaultLandmassRotation = 0.0f;
 constexpr uint16_t kGifDelayCs = 8;
 
 const fs::path kRepoRoot(PLATE_TECTONICS_ROOT);
@@ -50,6 +53,10 @@ struct Params {
     bool show_boundaries;
     uint32_t cycles;
     uint32_t plates;
+    uint32_t erosion_period;
+    float erosion_strength;
+    float rotation_strength;
+    float landmass_rotation;
     uint32_t step;
     bool custom_dimensions;
     std::string filename;
@@ -104,6 +111,16 @@ uint32_t parse_u32(const char* flag, const char* value)
     return static_cast<uint32_t>(parsed);
 }
 
+float parse_nonnegative_float(const char* flag, const char* value)
+{
+    char* end = nullptr;
+    const float parsed = strtof(value, &end);
+    if (end == value || *end != '\0' || !std::isfinite(parsed) || parsed < 0.0f) {
+        fail(std::string("invalid value for ") + flag + ": " + value);
+    }
+    return parsed;
+}
+
 std::string escape_powershell_single_quotes(const std::string& value)
 {
     std::string escaped;
@@ -129,6 +146,10 @@ void print_help()
     printf(" --filename NAME     : output basename when no input image is used\n");
     printf(" --cycles N          : number of simulation cycles to run\n");
     printf(" --plates N          : number of tectonic plates to initialize\n");
+    printf(" --erosion-period N  : number of updates between erosion passes\n");
+    printf(" --erosion-strength X: scale erosion amount (0 disables)\n");
+    printf(" --rotation-strength X: scale angular plate motion\n");
+    printf(" --landmass-rotation X: scale visible crust rotation (0 disables)\n");
     printf(" --step X            : save intermediate maps every X steps\n");
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
@@ -149,6 +170,10 @@ Params fill_params(int argc, char* argv[])
         false,
         kDefaultCycleCount,
         kDefaultPlateCount,
+        kErosionPeriod,
+        kDefaultErosionStrength,
+        kDefaultRotationStrength,
+        kDefaultLandmassRotation,
         0,
         false,
         "simulation",
@@ -200,6 +225,31 @@ Params fill_params(int argc, char* argv[])
                 fail("a parameter should follow --plates");
             }
             params.plates = parse_u32("--plates", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--erosion-period") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --erosion-period");
+            }
+            params.erosion_period = parse_u32("--erosion-period", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--erosion-strength") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --erosion-strength");
+            }
+            params.erosion_strength = parse_nonnegative_float("--erosion-strength", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--rotation-strength") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --rotation-strength");
+            }
+            params.rotation_strength = parse_nonnegative_float("--rotation-strength", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--landmass-rotation") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --landmass-rotation");
+            }
+            params.landmass_rotation =
+                parse_nonnegative_float("--landmass-rotation", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--step") == 0) {
             if (p + 1 >= argc) {
@@ -659,6 +709,10 @@ int main(int argc, char* argv[])
     printf(" map      : %s\n", params.colors ? "colors" : "grayscale");
     printf(" cycles   : %u\n", params.cycles);
     printf(" plates   : %u\n", params.plates);
+    printf(" erosion  : every %u updates, strength %.2f\n", params.erosion_period,
+           params.erosion_strength);
+    printf(" rotation : motion %.2f, landmass %.2f\n", params.rotation_strength,
+           params.landmass_rotation);
     if (!resolved_input_path.empty()) {
         printf(" input    : %s\n", display_path(resolved_input_path).c_str());
     }
@@ -678,8 +732,10 @@ int main(int argc, char* argv[])
     printf("\n");
 
     void* simulation = platec_api_create(params.seed, params.width, params.height, kSeaLevel,
-                                         kErosionPeriod, kFoldingRatio, kAggrOverlapAbs,
-                                         kAggrOverlapRel, params.cycles, params.plates);
+                                         params.erosion_period, kFoldingRatio, kAggrOverlapAbs,
+                                         kAggrOverlapRel, params.cycles, params.plates,
+                                         params.erosion_strength, params.landmass_rotation,
+                                         params.rotation_strength);
 
     if (!input_heightmap.empty()) {
         platec_api_load_heightmap(simulation, input_heightmap.data(), kSeaLevel);
