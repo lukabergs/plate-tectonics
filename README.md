@@ -54,9 +54,11 @@ This should produce a library (libPlateTectonics.a) in the build directory.
 ```
 mkdir build
 cd build
-cmake ..
+cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
 cmake --build .
 ```
+
+This project uses `libpng` for tests and examples. With the vcpkg toolchain enabled, the root `vcpkg.json` manifest installs that dependency automatically.
 
 If you want to build also the examples run:
 
@@ -85,7 +87,7 @@ From the root directory run:
 ```bash
 mkdir -p build
 cd build
-cmake .. -DWITH_EXAMPLES=ON -G "Unix Makefiles"
+cmake .. -DWITH_EXAMPLES=ON -DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
 make
 cd examples
 ./simulation

@@ -1,27 +1,21 @@
-#include <stdio.h>
+#include "map_drawing.hpp"
 #include "platecapi.hpp"
 #include "sqrdmd.hpp"
-#include <cstdlib>
-#include "map_drawing.hpp"
-#include <stdio.h>
-#include <execinfo.h>
-#include <signal.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <cstdlib>
-#include <iostream>
 #include <utils.hpp>
-
-#include <execinfo.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 
 void produce_image_gray(float* heightmap, int width, int height, const char* filename)
 {
-    writeImageGray((char*)filename, width, height, heightmap, "FOO");
+    writeImageGray(filename, width, height, heightmap, "FOO");
 }
 
 void produce_image_colors(float* heightmap, int width, int height, const char* filename)
 {
-    writeImageColors((char*)filename, width, height, heightmap, "FOO");
+    writeImageColors(filename, width, height, heightmap, "FOO");
 }
 
 void save_image(void* p, const char* filename, const int width, const int height, bool colors)
@@ -51,8 +45,8 @@ char DEFAULT_FILENAME[] = "simulation";
 
 void fill_params(Params& params, int argc, char* argv[])
 {
-    srand(time(nullptr));
-    params.seed = rand();
+    srand(static_cast<unsigned int>(time(nullptr)));
+    params.seed = static_cast<uint32_t>(rand());
     params.width = 600;
     params.height = 400;
     params.colors = true;
@@ -148,19 +142,19 @@ int main(int argc, char* argv[])
     fill_params(params, argc, argv);
 
     printf("Plate-tectonics simulation example\n");
-    printf(" seed     : %d\n", params.seed);
-    printf(" width    : %d\n", params.width);
-    printf(" height   : %d\n", params.height);
+    printf(" seed     : %u\n", params.seed);
+    printf(" width    : %u\n", params.width);
+    printf(" height   : %u\n", params.height);
     printf(" map      : %s\n", params.colors ? "colors" : "grayscale");
     printf(" filename : %s\n", params.filename);
     if (params.step == 0)
         printf(" step     : no\n");
     else
-        printf(" step     : %i\n", params.step);
+        printf(" step     : %u\n", params.step);
 
     printf("\n");
 
-    void* p = platec_api_create(params.seed, params.width, params.height, 0.65, 60, 0.02,1000000, 0.33, 2, 10);
+    void* p = platec_api_create(params.seed, params.width, params.height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10);
 
     char filenamei[250];
     snprintf(filenamei, sizeof(filenamei), "%s_initial.png", params.filename);
