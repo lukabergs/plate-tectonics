@@ -131,3 +131,28 @@ float platec_api_velocity_unity_vector_y(void* pointer, uint32_t plate_index) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     return litho->getPlate(plate_index)->velocityUnitVector().y();
 }
+
+float platec_api_velocity_vector_x(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->linearVelocityVector().x();
+}
+
+float platec_api_velocity_vector_y(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->linearVelocityVector().y();
+}
+
+float platec_api_angular_velocity(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->getAngularVelocity();
+}
+
+float platec_api_mass_center_x(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->worldMassCenter().getX();
+}
+
+float platec_api_mass_center_y(void* pointer, uint32_t plate_index) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlate(plate_index)->worldMassCenter().getY();
+}

@@ -24,7 +24,8 @@
 
 Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension)
     : _randsource(randsource), _worldDimension(worldDimension), velocity(1),
-      rot_dir(static_cast<float>(randsource.next() % 2 ? 1 : -1)), dx(0), dy(0) {
+      rot_dir(static_cast<float>(randsource.next() % 2 ? 1 : -1)), last_rotation_angle(0), dx(0),
+      dy(0) {
     const float angle = 2.0f * PI * _randsource.next_float();
     vx = cosf(angle) * INITIAL_SPEED_X;
     vy = sinf(angle) * INITIAL_SPEED_X;
@@ -69,6 +70,7 @@ void Movement::move() {
     uint32_t world_avg_side = (_worldDimension.getWidth() + _worldDimension.getHeight()) / 2;
     float alpha = rot_dir * velocity / (world_avg_side * 0.33f);
     float alpha_vel = alpha * velocity;
+    last_rotation_angle = alpha_vel * BODY_ROTATION_FACTOR;
     float _cos = cosf(alpha_vel);
     float _sin = sinf(alpha_vel);
     float _vx = vx * _cos - vy * _sin;

@@ -121,6 +121,9 @@ class lithosphere {
     void createSlowNoise(float* tmp, const WorldDimension& tmpDim);
     void updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                                        uint32_t& continental_collisions);
+    uint32_t chooseDivergentOwner(uint32_t x, uint32_t y, uint32_t index) const;
+    bool hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const;
+    void regenerateCrust();
     void updateCollisions();
     void clearPlates();
     void growPlates();

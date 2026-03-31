@@ -37,6 +37,33 @@
 
 using namespace std;
 
+namespace {
+
+float wrapped_delta(float point, float center, uint32_t world_size) {
+    float delta = point - center;
+    const float period = static_cast<float>(world_size);
+    const float half_period = period * 0.5f;
+    if (delta > half_period) {
+        delta -= period;
+    } else if (delta < -half_period) {
+        delta += period;
+    }
+    return delta;
+}
+
+float wrap_coordinate(float value, uint32_t world_size) {
+    const float period = static_cast<float>(world_size);
+    while (value < 0.0f) {
+        value += period;
+    }
+    while (value >= period) {
+        value -= period;
+    }
+    return value;
+}
+
+} // namespace
+
 plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t _y,
              uint32_t plate_age, WorldDimension worldDimension)
     : _worldDimension(worldDimension), _randsource(seed), map(m, w, h), age_map(w, h),
@@ -105,6 +132,8 @@ void plate::addCrustBySubduction(uint32_t x, uint32_t y, float z, uint32_t t, fl
     //       Drawbacks:
     //           Additional logic required
     //           Might place crust on other continent on same plate!
+    const uint32_t world_x = x;
+    const uint32_t world_y = y;
     _bounds->getValidMapIndex(&x, &y);
 
     // Take vector difference only between plates that move more or less
@@ -112,9 +141,12 @@ void plate::addCrustBySubduction(uint32_t x, uint32_t y, float z, uint32_t t, fl
     //
     // Use of "this" pointer is not necessary, but it make code clearer.
     // Cursed be those who use "m_" prefix in member names! >(
-    float dot = _movement.dot(dx, dy);
-    dx -= _movement.velocityOnX(dot > 0);
-    dy -= _movement.velocityOnY(dot > 0);
+    Platec::FloatVector local_velocity = surfaceVelocityAt(world_x, world_y);
+    const float dot = local_velocity.dotProduct(Platec::FloatVector(dx, dy));
+    if (dot > 0.0f && local_velocity.normalize() > 0.0f) {
+        dx -= local_velocity.x();
+        dy -= local_velocity.y();
+    }
 
     float offset = _randsource.next_float();
     float offset_sign = static_cast<float>(2 * static_cast<int>(_randsource.next() % 2) - 1);
@@ -473,6 +505,38 @@ uint32_t plate::getCrustTimestamp(uint32_t x, uint32_t y) const {
     return index != BAD_INDEX ? age_map[index] : 0;
 }
 
+FloatPoint plate::worldMassCenter() const {
+    if (_mass.null()) {
+        return FloatPoint(static_cast<float>(_bounds->leftAsUint()),
+                          static_cast<float>(_bounds->topAsUint()));
+    }
+
+    const float world_x =
+        wrap_coordinate(static_cast<float>(_bounds->leftAsUint()) + _mass.getCx(),
+                        _worldDimension.getWidth());
+    const float world_y =
+        wrap_coordinate(static_cast<float>(_bounds->topAsUint()) + _mass.getCy(),
+                        _worldDimension.getHeight());
+    return FloatPoint(world_x, world_y);
+}
+
+Platec::FloatVector plate::surfaceVelocityAt(uint32_t x, uint32_t y) const {
+    const Platec::FloatVector linear_velocity = _movement.velocityVector();
+    if (_mass.null()) {
+        return linear_velocity;
+    }
+
+    const FloatPoint center = worldMassCenter();
+    const float dx =
+        wrapped_delta(static_cast<float>(x), center.getX(), _worldDimension.getWidth());
+    const float dy =
+        wrapped_delta(static_cast<float>(y), center.getY(), _worldDimension.getHeight());
+    const float angular_velocity = _movement.rotationAngle();
+
+    return Platec::FloatVector(linear_velocity.x() - dy * angular_velocity,
+                               linear_velocity.y() + dx * angular_velocity);
+}
+
 void plate::getMap(const float** c, const uint32_t** t) const {
     if (c) {
         *c = map.raw_data();
@@ -482,8 +546,179 @@ void plate::getMap(const float** c, const uint32_t** t) const {
     }
 }
 
+void plate::ensureRotationPadding(uint32_t margin) {
+    if (margin == 0) {
+        return;
+    }
+
+    const uint32_t width = _bounds->width();
+    const uint32_t height = _bounds->height();
+    if (width >= _worldDimension.getWidth() && height >= _worldDimension.getHeight()) {
+        return;
+    }
+
+    bool need_left = false;
+    bool need_right = false;
+    bool need_top = false;
+    bool need_bottom = false;
+
+    for (uint32_t y = 0; y < height && !(need_left && need_right); ++y) {
+        for (uint32_t x = 0; x < margin && x < width; ++x) {
+            if (map[y * width + x] > 0.0f) {
+                need_left = true;
+                break;
+            }
+        }
+        for (uint32_t x = 0; x < margin && x < width; ++x) {
+            if (map[y * width + (width - 1 - x)] > 0.0f) {
+                need_right = true;
+                break;
+            }
+        }
+    }
+
+    for (uint32_t x = 0; x < width && !(need_top && need_bottom); ++x) {
+        for (uint32_t y = 0; y < margin && y < height; ++y) {
+            if (map[y * width + x] > 0.0f) {
+                need_top = true;
+                break;
+            }
+        }
+        for (uint32_t y = 0; y < margin && y < height; ++y) {
+            if (map[(height - 1 - y) * width + x] > 0.0f) {
+                need_bottom = true;
+                break;
+            }
+        }
+    }
+
+    uint32_t available_x = _worldDimension.getWidth() - width;
+    uint32_t available_y = _worldDimension.getHeight() - height;
+    uint32_t pad_left = need_left && available_x > 0 ? 1U : 0U;
+    uint32_t pad_right = need_right && available_x > pad_left ? 1U : 0U;
+    uint32_t pad_top = need_top && available_y > 0 ? 1U : 0U;
+    uint32_t pad_bottom = need_bottom && available_y > pad_top ? 1U : 0U;
+
+    if (pad_left == 0 && pad_right == 0 && pad_top == 0 && pad_bottom == 0) {
+        return;
+    }
+
+    _bounds->shift(-1.0f * static_cast<float>(pad_left), -1.0f * static_cast<float>(pad_top));
+    _bounds->grow(static_cast<int>(pad_left + pad_right), static_cast<int>(pad_top + pad_bottom));
+
+    HeightMap padded_map(_bounds->width(), _bounds->height());
+    AgeMap padded_age(_bounds->width(), _bounds->height());
+    uint32_t* padded_segments = new uint32_t[_bounds->area()];
+    padded_map.set_all(0.0f);
+    padded_age.set_all(0);
+    memset(padded_segments, 255, _bounds->area() * sizeof(uint32_t));
+
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint32_t dest_index = (pad_top + y) * _bounds->width() + pad_left;
+        const uint32_t src_index = y * width;
+        memcpy(&padded_map[dest_index], &map[src_index], width * sizeof(float));
+        memcpy(&padded_age[dest_index], &age_map[src_index], width * sizeof(uint32_t));
+    }
+
+    map = padded_map;
+    age_map = padded_age;
+    _segments->reassign(_bounds->area(), padded_segments);
+    _segments->shift(pad_left, pad_top);
+}
+
+void plate::rotateCrust(float angle) {
+    if (fabsf(angle) < 0.0001f || _mass.null()) {
+        return;
+    }
+
+    ensureRotationPadding(1);
+
+    const uint32_t width = _bounds->width();
+    const uint32_t height = _bounds->height();
+    const uint32_t area = _bounds->area();
+    HeightMap rotated(width, height);
+    AgeMap rotated_age(width, height);
+    std::vector<float> age_accumulator(area, 0.0f);
+    rotated.set_all(0.0f);
+    rotated_age.set_all(0);
+
+    float center_x = _mass.getCx();
+    float center_y = _mass.getCy();
+    if (!_bounds->isInLimits(center_x, center_y)) {
+        center_x = (static_cast<float>(width) - 1.0f) * 0.5f;
+        center_y = (static_cast<float>(height) - 1.0f) * 0.5f;
+    }
+
+    const float c = cosf(angle);
+    const float s = sinf(angle);
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t index = y * width + x;
+            const float crust = map[index];
+            if (crust <= 0.0f) {
+                continue;
+            }
+
+            const float dx = static_cast<float>(x) - center_x;
+            const float dy = static_cast<float>(y) - center_y;
+            const float rotated_x = dx * c - dy * s + center_x;
+            const float rotated_y = dx * s + dy * c + center_y;
+            const int x0 = static_cast<int>(floorf(rotated_x));
+            const int y0 = static_cast<int>(floorf(rotated_y));
+            const float frac_x = rotated_x - static_cast<float>(x0);
+            const float frac_y = rotated_y - static_cast<float>(y0);
+
+            for (int oy = 0; oy <= 1; ++oy) {
+                for (int ox = 0; ox <= 1; ++ox) {
+                    const int tx = x0 + ox;
+                    const int ty = y0 + oy;
+                    if (tx < 0 || ty < 0 || tx >= static_cast<int>(width) ||
+                        ty >= static_cast<int>(height)) {
+                        continue;
+                    }
+
+                    const float wx = ox == 0 ? 1.0f - frac_x : frac_x;
+                    const float wy = oy == 0 ? 1.0f - frac_y : frac_y;
+                    const float weight = wx * wy;
+                    if (weight <= 0.0f) {
+                        continue;
+                    }
+
+                    const uint32_t dest_index =
+                        static_cast<uint32_t>(ty) * width + static_cast<uint32_t>(tx);
+                    const float contributed_crust = crust * weight;
+                    rotated[dest_index] += contributed_crust;
+                    age_accumulator[dest_index] += contributed_crust * static_cast<float>(age_map[index]);
+                }
+            }
+        }
+    }
+
+    MassBuilder mass_builder;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t index = y * width + x;
+            if (rotated[index] <= 0.00001f) {
+                rotated[index] = 0.0f;
+                rotated_age[index] = 0;
+                continue;
+            }
+
+            rotated_age[index] =
+                static_cast<uint32_t>(age_accumulator[index] / rotated[index]);
+            mass_builder.addPoint(x, y, rotated[index]);
+        }
+    }
+
+    map = rotated;
+    age_map = rotated_age;
+    _mass = mass_builder.build();
+}
+
 void plate::move() {
     _movement.move();
+    rotateCrust(_movement.rotationAngle());
 
     // Location modulations into range [0..world width/height[ are a have to!
     // If left undone SOMETHING WILL BREAK DOWN SOMEWHERE in the code!

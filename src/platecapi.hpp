@@ -38,6 +38,11 @@ uint32_t platec_api_get_plate_count(void*);
 
 float platec_api_velocity_unity_vector_x(void*, uint32_t plate_index);
 float platec_api_velocity_unity_vector_y(void*, uint32_t plate_index);
+float platec_api_velocity_vector_x(void*, uint32_t plate_index);
+float platec_api_velocity_vector_y(void*, uint32_t plate_index);
+float platec_api_angular_velocity(void*, uint32_t plate_index);
+float platec_api_mass_center_x(void*, uint32_t plate_index);
+float platec_api_mass_center_y(void*, uint32_t plate_index);
 
 uint32_t lithosphere_getMapWidth(void* object);
 uint32_t lithosphere_getMapHeight(void* object);

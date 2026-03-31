@@ -32,6 +32,7 @@
 #define CONT_BASE 1.0 ///< Height limit that separates seas from dry land.
 #define INITIAL_SPEED_X 1
 #define DEFORMATION_WEIGHT 2
+#define BODY_ROTATION_FACTOR 0.75f
 
 typedef uint32_t ContinentId;
 
@@ -64,6 +65,9 @@ class Movement : public IMovement {
     float velocityOnY(float length) const;
     float dot(float dx_, float dy_) const;
     float momentum(const Mass& mass) const throw();
+    float rotationAngle() const {
+        return last_rotation_angle;
+    }
     float getVelocity() const {
         return velocity;
     };
@@ -96,6 +100,7 @@ class Movement : public IMovement {
     const WorldDimension _worldDimension;
     float velocity; ///< Plate's velocity.
     float rot_dir;  ///< Direction of rotation: 1 = CCW, -1 = ClockWise.
+    float last_rotation_angle; ///< Plate body rotation applied on latest move.
     float dx, dy;   ///< X and Y components of plate's acceleration vector.
     float vx, vy;   ///< X and Y components of plate's direction unit vector.
 };

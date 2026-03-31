@@ -33,7 +33,7 @@ constexpr float kFoldingRatio = 0.02f;
 constexpr uint32_t kAggrOverlapAbs = 1000000;
 constexpr float kAggrOverlapRel = 0.33f;
 constexpr uint32_t kDefaultCycleCount = 2;
-constexpr uint32_t kPlateCount = 10;
+constexpr uint32_t kDefaultPlateCount = 10;
 constexpr uint16_t kGifDelayCs = 8;
 
 const fs::path kRepoRoot(PLATE_TECTONICS_ROOT);
@@ -49,6 +49,7 @@ struct Params {
     bool delete_gif_frames;
     bool show_boundaries;
     uint32_t cycles;
+    uint32_t plates;
     uint32_t step;
     bool custom_dimensions;
     std::string filename;
@@ -57,15 +58,27 @@ struct Params {
 
 struct BoundaryOverlayData {
     std::vector<uint32_t> platesmap;
-    std::vector<float> vel_x;
-    std::vector<float> vel_y;
+    std::vector<float> linear_vel_x;
+    std::vector<float> linear_vel_y;
+    std::vector<float> angular_velocity;
+    std::vector<float> mass_center_x;
+    std::vector<float> mass_center_y;
     uint32_t plate_count = 0;
 
     bool valid() const
     {
-        return plate_count > 0 && !platesmap.empty() && vel_x.size() == plate_count &&
-               vel_y.size() == plate_count;
+        return plate_count > 0 && !platesmap.empty() &&
+               linear_vel_x.size() == plate_count &&
+               linear_vel_y.size() == plate_count &&
+               angular_velocity.size() == plate_count &&
+               mass_center_x.size() == plate_count &&
+               mass_center_y.size() == plate_count;
     }
+};
+
+struct BoundaryVelocity {
+    float x;
+    float y;
 };
 
 [[noreturn]] void fail(const std::string& message)
@@ -115,6 +128,7 @@ void print_help()
     printf(" --grayscale         : generate a grayscale map\n");
     printf(" --filename NAME     : output basename when no input image is used\n");
     printf(" --cycles N          : number of simulation cycles to run\n");
+    printf(" --plates N          : number of tectonic plates to initialize\n");
     printf(" --step X            : save intermediate maps every X steps\n");
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
@@ -134,6 +148,7 @@ Params fill_params(int argc, char* argv[])
         false,
         false,
         kDefaultCycleCount,
+        kDefaultPlateCount,
         0,
         false,
         "simulation",
@@ -179,6 +194,12 @@ Params fill_params(int argc, char* argv[])
                 fail("a parameter should follow --cycles");
             }
             params.cycles = parse_u32("--cycles", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--plates") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --plates");
+            }
+            params.plates = parse_u32("--plates", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--step") == 0) {
             if (p + 1 >= argc) {
@@ -398,14 +419,47 @@ bool capture_boundary_overlay(void* simulation, int width, int height, BoundaryO
 
     data.plate_count = plate_count;
     data.platesmap.assign(platesmap, platesmap + static_cast<size_t>(width) * static_cast<size_t>(height));
-    data.vel_x.resize(plate_count);
-    data.vel_y.resize(plate_count);
+    data.linear_vel_x.resize(plate_count);
+    data.linear_vel_y.resize(plate_count);
+    data.angular_velocity.resize(plate_count);
+    data.mass_center_x.resize(plate_count);
+    data.mass_center_y.resize(plate_count);
 
     for (uint32_t plate_index = 0; plate_index < plate_count; ++plate_index) {
-        data.vel_x[plate_index] = platec_api_velocity_unity_vector_x(simulation, plate_index);
-        data.vel_y[plate_index] = platec_api_velocity_unity_vector_y(simulation, plate_index);
+        data.linear_vel_x[plate_index] = platec_api_velocity_vector_x(simulation, plate_index);
+        data.linear_vel_y[plate_index] = platec_api_velocity_vector_y(simulation, plate_index);
+        data.angular_velocity[plate_index] = platec_api_angular_velocity(simulation, plate_index);
+        data.mass_center_x[plate_index] = platec_api_mass_center_x(simulation, plate_index);
+        data.mass_center_y[plate_index] = platec_api_mass_center_y(simulation, plate_index);
     }
     return true;
+}
+
+float wrapped_delta(float point, float center, float period)
+{
+    float delta = point - center;
+    const float half_period = period * 0.5f;
+    if (delta > half_period) {
+        delta -= period;
+    } else if (delta < -half_period) {
+        delta += period;
+    }
+    return delta;
+}
+
+BoundaryVelocity surface_velocity_at(const BoundaryOverlayData& data, uint32_t plate_index, int x,
+                                     int y, int width, int height)
+{
+    const float dx = wrapped_delta(static_cast<float>(x), data.mass_center_x[plate_index],
+                                   static_cast<float>(width));
+    const float dy = wrapped_delta(static_cast<float>(y), data.mass_center_y[plate_index],
+                                   static_cast<float>(height));
+    const float omega = data.angular_velocity[plate_index];
+
+    return BoundaryVelocity {
+        data.linear_vel_x[plate_index] - dy * omega,
+        data.linear_vel_y[plate_index] + dx * omega
+    };
 }
 
 void overlay_boundaries(const BoundaryOverlayData& data, int width, int height, std::vector<png_byte>& rgb)
@@ -437,9 +491,13 @@ void overlay_boundaries(const BoundaryOverlayData& data, int width, int height, 
                     continue;
                 }
 
+                const BoundaryVelocity velocity_a =
+                    surface_velocity_at(data, plate_a, x, y, width, height);
+                const BoundaryVelocity velocity_b =
+                    surface_velocity_at(data, plate_b, nx, ny, width, height);
                 const BoundaryType candidate =
-                    classify_boundary(data.vel_x[plate_a], data.vel_y[plate_a],
-                                      data.vel_x[plate_b], data.vel_y[plate_b],
+                    classify_boundary(velocity_a.x, velocity_a.y,
+                                      velocity_b.x, velocity_b.y,
                                       static_cast<float>(offset[0]), static_cast<float>(offset[1]));
                 boundary_type = strongest_boundary(boundary_type, candidate);
             }
@@ -600,6 +658,7 @@ int main(int argc, char* argv[])
     printf(" height   : %u\n", params.height);
     printf(" map      : %s\n", params.colors ? "colors" : "grayscale");
     printf(" cycles   : %u\n", params.cycles);
+    printf(" plates   : %u\n", params.plates);
     if (!resolved_input_path.empty()) {
         printf(" input    : %s\n", display_path(resolved_input_path).c_str());
     }
@@ -620,7 +679,7 @@ int main(int argc, char* argv[])
 
     void* simulation = platec_api_create(params.seed, params.width, params.height, kSeaLevel,
                                          kErosionPeriod, kFoldingRatio, kAggrOverlapAbs,
-                                         kAggrOverlapRel, params.cycles, kPlateCount);
+                                         kAggrOverlapRel, params.cycles, params.plates);
 
     if (!input_heightmap.empty()) {
         platec_api_load_heightmap(simulation, input_heightmap.data(), kSeaLevel);

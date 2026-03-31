@@ -216,6 +216,14 @@ class plate : public IPlate {
     float getVelocity() const throw() {
         return _movement.getVelocity();
     }
+    float getAngularVelocity() const throw() {
+        return _movement.rotationAngle();
+    }
+    Platec::FloatVector linearVelocityVector() const {
+        return _movement.velocityVector();
+    }
+    FloatPoint worldMassCenter() const;
+    Platec::FloatVector surfaceVelocityAt(uint32_t x, uint32_t y) const;
 
     Platec::FloatVector velocityUnitVector() const override {
         return _movement.velocityUnitVector();
@@ -279,6 +287,8 @@ class plate : public IPlate {
   private:
     ISegmentData& getContinentAt(int x, int y);
     const ISegmentData& getContinentAt(int x, int y) const;
+    void ensureRotationPadding(uint32_t margin);
+    void rotateCrust(float angle);
     void findRiverSources(float lower_bound, vector<uint32_t>* sources);
     void flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& tmp);
     uint32_t createSegment(uint32_t x, uint32_t y) throw();

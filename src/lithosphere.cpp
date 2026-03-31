@@ -49,6 +49,18 @@ static const uint32_t NO_COLLISION_TIME_LIMIT = 10;
 uint32_t findBound(const uint32_t* map, uint32_t length, uint32_t x0, uint32_t y0, int dx, int dy);
 uint32_t findPlate(plate** plates, float x, float y, uint32_t num_plates);
 
+static void push_unique_owner(std::vector<uint32_t>& candidates, uint32_t owner, uint32_t plate_count) {
+    if (owner >= plate_count) {
+        return;
+    }
+    for (uint32_t existing : candidates) {
+        if (existing == owner) {
+            return;
+        }
+    }
+    candidates.push_back(owner);
+}
+
 WorldPoint lithosphere::randomPosition() {
     return WorldPoint(_randsource.next() % _worldDimension.getWidth(),
                       _randsource.next() % _worldDimension.getHeight(), _worldDimension);
@@ -568,6 +580,212 @@ void lithosphere::updateCollisions() {
     }
 }
 
+uint32_t lithosphere::chooseDivergentOwner(uint32_t x, uint32_t y, uint32_t index) const {
+    std::vector<uint32_t> candidates;
+    const uint32_t world_width = _worldDimension.getWidth();
+    const uint32_t world_height = _worldDimension.getHeight();
+    const uint32_t left_x = x > 0 ? x - 1 : world_width - 1;
+    const uint32_t right_x = x + 1 < world_width ? x + 1 : 0;
+    const uint32_t top_y = y > 0 ? y - 1 : world_height - 1;
+    const uint32_t bottom_y = y + 1 < world_height ? y + 1 : 0;
+    const uint32_t top_left = _worldDimension.indexOf(left_x, top_y);
+    const uint32_t top_right = _worldDimension.indexOf(right_x, top_y);
+    const uint32_t bottom_left = _worldDimension.indexOf(left_x, bottom_y);
+    const uint32_t bottom_right = _worldDimension.indexOf(right_x, bottom_y);
+    const uint32_t left = _worldDimension.indexOf(left_x, y);
+    const uint32_t right = _worldDimension.indexOf(right_x, y);
+    const uint32_t top = _worldDimension.indexOf(x, top_y);
+    const uint32_t bottom = _worldDimension.indexOf(x, bottom_y);
+    struct NeighborWeight {
+        uint32_t index;
+        float prev_weight;
+        float current_weight;
+    };
+    const NeighborWeight neighbors[] = {
+        {left, 0.75f, 2.6f},
+        {right, 0.75f, 2.6f},
+        {top, 0.75f, 2.6f},
+        {bottom, 0.75f, 2.6f},
+        {top_left, 0.35f, 1.5f},
+        {top_right, 0.35f, 1.5f},
+        {bottom_left, 0.35f, 1.5f},
+        {bottom_right, 0.35f, 1.5f},
+    };
+
+    push_unique_owner(candidates, prev_imap[index], num_plates);
+    for (const NeighborWeight& neighbor : neighbors) {
+        push_unique_owner(candidates, prev_imap[neighbor.index], num_plates);
+        push_unique_owner(candidates, imap[neighbor.index], num_plates);
+    }
+
+    if (candidates.empty()) {
+        return prev_imap[index];
+    }
+
+    uint32_t best_owner = candidates[0];
+    float best_score = -FLT_MAX;
+
+    for (uint32_t owner : candidates) {
+        float score = 0.0f;
+        if (prev_imap[index] == owner) {
+            score += 0.4f;
+        }
+
+        for (const NeighborWeight& neighbor : neighbors) {
+            if (prev_imap[neighbor.index] == owner) {
+                score += neighbor.prev_weight;
+            }
+            if (imap[neighbor.index] == owner) {
+                score += neighbor.current_weight;
+                if (amap[neighbor.index] == iter_count) {
+                    score += neighbor.current_weight * 1.35f;
+                }
+            }
+        }
+
+        const float owner_noise = scaled_octave_noise_4d(
+            4.0f, 0.58f, 0.085f, -1.0f, 1.0f,
+            static_cast<float>(x) + static_cast<float>(owner) * 13.0f + 17.0f,
+            static_cast<float>(y) + static_cast<float>(owner) * 7.0f + 29.0f,
+            static_cast<float>(iter_count) * 0.09f, static_cast<float>(owner) * 19.0f + 11.0f);
+        const float warp_noise = scaled_octave_noise_4d(
+            2.0f, 0.5f, 0.18f, -0.75f, 0.75f, static_cast<float>(x) * 0.75f + 5.0f,
+            static_cast<float>(y) * 0.75f + 13.0f, static_cast<float>(iter_count) * 0.05f,
+            static_cast<float>(owner) * 31.0f + 43.0f);
+        score += owner_noise * 2.1f + warp_noise * 1.5f;
+
+        if (score > best_score) {
+            best_score = score;
+            best_owner = owner;
+        }
+    }
+
+    return best_owner;
+}
+
+bool lithosphere::hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const {
+    const uint32_t world_width = _worldDimension.getWidth();
+    const uint32_t world_height = _worldDimension.getHeight();
+    const uint32_t left_x = x > 0 ? x - 1 : world_width - 1;
+    const uint32_t right_x = x + 1 < world_width ? x + 1 : 0;
+    const uint32_t top_y = y > 0 ? y - 1 : world_height - 1;
+    const uint32_t bottom_y = y + 1 < world_height ? y + 1 : 0;
+    const uint32_t neighbors[] = {
+        _worldDimension.indexOf(left_x, y),
+        _worldDimension.indexOf(right_x, y),
+        _worldDimension.indexOf(x, top_y),
+        _worldDimension.indexOf(x, bottom_y),
+        _worldDimension.indexOf(left_x, top_y),
+        _worldDimension.indexOf(right_x, top_y),
+        _worldDimension.indexOf(left_x, bottom_y),
+        _worldDimension.indexOf(right_x, bottom_y),
+    };
+
+    for (uint32_t neighbor : neighbors) {
+        if (imap[neighbor] < num_plates) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void lithosphere::regenerateCrust() {
+    const uint32_t map_area = _worldDimension.getArea();
+    std::vector<uint32_t> frontier;
+    std::vector<uint8_t> queued(map_area, 0);
+    frontier.reserve(map_area / 32);
+
+    auto enqueue = [&](uint32_t index, std::vector<uint32_t>& target) {
+        if (imap[index] >= num_plates && !queued[index]) {
+            target.push_back(index);
+            queued[index] = 1;
+        }
+    };
+
+    auto assign_new_crust = [&](uint32_t index) {
+        if (imap[index] < num_plates) {
+            return;
+        }
+
+        const uint32_t x = _worldDimension.xFromIndex(index);
+        const uint32_t y = _worldDimension.yFromIndex(index);
+        imap[index] = chooseDivergentOwner(x, y, index);
+        amap[index] = iter_count;
+
+        const float roughness = scaled_octave_noise_4d(
+            3.0f, 0.5f, 0.08f, -0.12f, 0.12f, static_cast<float>(x) + 41.0f,
+            static_cast<float>(y) + 13.0f, static_cast<float>(iter_count) * 0.09f, 71.0f);
+        hmap[index] = OCEANIC_BASE * BUOYANCY_BONUS_X * (1.0f + roughness);
+
+        if (imap[index] < num_plates) {
+            plates[imap[index]]->setCrust(x, y, OCEANIC_BASE, iter_count);
+            ++plate_indices_found[imap[index]];
+        }
+    };
+
+    for (uint32_t index = 0; index < map_area; ++index) {
+        if (imap[index] < num_plates) {
+            if (++plate_indices_found[imap[index]] && hmap[index] <= 0) {
+                puts("Occupied point has no land mass!");
+                exit(1);
+            }
+            continue;
+        }
+
+        const uint32_t x = _worldDimension.xFromIndex(index);
+        const uint32_t y = _worldDimension.yFromIndex(index);
+        if (hasAssignedOwnerNeighbor(x, y)) {
+            enqueue(index, frontier);
+        }
+    }
+
+    if (frontier.empty()) {
+        for (uint32_t index = 0; index < map_area; ++index) {
+            enqueue(index, frontier);
+        }
+    }
+
+    while (!frontier.empty()) {
+        std::vector<uint32_t> next_frontier;
+        next_frontier.reserve(frontier.size() * 2);
+
+        while (!frontier.empty()) {
+            const size_t pick = frontier.size() > 1 ? _randsource.next() % frontier.size() : 0;
+            const uint32_t index = frontier[pick];
+            frontier[pick] = frontier.back();
+            frontier.pop_back();
+
+            if (imap[index] < num_plates) {
+                continue;
+            }
+
+            assign_new_crust(index);
+
+            const uint32_t x = _worldDimension.xFromIndex(index);
+            const uint32_t y = _worldDimension.yFromIndex(index);
+            const uint32_t left_x = x > 0 ? x - 1 : _worldDimension.getWidth() - 1;
+            const uint32_t right_x = x + 1 < _worldDimension.getWidth() ? x + 1 : 0;
+            const uint32_t top_y = y > 0 ? y - 1 : _worldDimension.getHeight() - 1;
+            const uint32_t bottom_y = y + 1 < _worldDimension.getHeight() ? y + 1 : 0;
+            enqueue(_worldDimension.indexOf(left_x, y), next_frontier);
+            enqueue(_worldDimension.indexOf(right_x, y), next_frontier);
+            enqueue(_worldDimension.indexOf(x, top_y), next_frontier);
+            enqueue(_worldDimension.indexOf(x, bottom_y), next_frontier);
+            enqueue(_worldDimension.indexOf(left_x, top_y), next_frontier);
+            enqueue(_worldDimension.indexOf(right_x, top_y), next_frontier);
+            enqueue(_worldDimension.indexOf(left_x, bottom_y), next_frontier);
+            enqueue(_worldDimension.indexOf(right_x, bottom_y), next_frontier);
+        }
+
+        frontier.swap(next_frontier);
+    }
+
+    for (uint32_t index = 0; index < map_area; ++index) {
+        assign_new_crust(index);
+    }
+}
+
 // Remove empty plates from the system.
 void lithosphere::removeEmptyPlates() {
     for (uint32_t i = 0; i < num_plates; ++i) {
@@ -648,9 +866,10 @@ void lithosphere::update() {
                 // Do not apply friction to oceanic plates.
                 // This is a very cheap way to emulate slab pull.
                 // Just perform subduction and on our way we go!
+                const Platec::FloatVector source_velocity =
+                    plates[coll.index]->surfaceVelocityAt(coll.wx, coll.wy);
                 plates[i]->addCrustBySubduction(coll.wx, coll.wy, coll.crust, iter_count,
-                                                plates[coll.index]->getVelX(),
-                                                plates[coll.index]->getVelY());
+                                                source_velocity.x(), source_velocity.y());
             }
 
             subductions[i].clear();
@@ -661,30 +880,8 @@ void lithosphere::update() {
         fill(plate_indices_found.begin(), plate_indices_found.end(), 0);
 
         // Fill divergent boundaries with new crustal material, molten magma.
-        for (uint32_t y = 0, i = 0; y < BOOL_REGENERATE_CRUST * _worldDimension.getHeight(); ++y) {
-            for (uint32_t x = 0; x < _worldDimension.getWidth(); ++x, ++i) {
-                if (imap[i] >= num_plates) {
-                    // The owner of this new crust is that neighbour plate
-                    // who was located at this point before plates moved.
-                    imap[i] = prev_imap[i];
-
-                    // If this is oceanic crust then add buoyancy to it.
-                    // Magma that has just crystallized into oceanic crust
-                    // is more buoyant than that which has had a lot of
-                    // time to cool down and become more dense.
-                    amap[i] = iter_count;
-                    hmap[i] = OCEANIC_BASE * BUOYANCY_BONUS_X;
-
-                    // This should probably not happen
-                    if (imap[i] < num_plates) {
-                        plates[imap[i]]->setCrust(x, y, OCEANIC_BASE, iter_count);
-                    }
-
-                } else if (++plate_indices_found[imap[i]] && hmap[i] <= 0) {
-                    puts("Occupied point has no land mass!");
-                    exit(1);
-                }
-            }
+        if (BOOL_REGENERATE_CRUST) {
+            regenerateCrust();
         }
 
         removeEmptyPlates();
