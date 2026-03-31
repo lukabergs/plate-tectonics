@@ -26,11 +26,19 @@
 void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_level,
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
                         float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates);
+void* platec_api_create_from_heightmap(long seed, uint32_t width, uint32_t height,
+                                       const float* heightmap, float sea_level,
+                                       uint32_t erosion_period, float folding_ratio,
+                                       uint32_t aggr_overlap_abs, float aggr_overlap_rel,
+                                       uint32_t cycle_count, uint32_t num_plates);
 
 void platec_api_destroy(void*);
 const uint32_t* platec_api_get_agemap(uint32_t);
 float* platec_api_get_heightmap(void*);
 uint32_t* platec_api_get_platesmap(void*);
+uint32_t platec_api_get_plate_count(void*);
+uint32_t platec_api_get_cycle_count(void*);
+uint32_t platec_api_get_iteration_count(void*);
 uint32_t platec_api_is_finished(void*);
 void platec_api_step(void*);
 

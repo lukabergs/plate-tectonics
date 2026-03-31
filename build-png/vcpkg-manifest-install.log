@@ -1,0 +1,89 @@
+Fetching registry information from https://github.com/microsoft/vcpkg (HEAD)...
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe
+The following packages will be built and installed:
+    libpng:x64-windows@1.6.53 -- git+https://github.com/microsoft/vcpkg@6bf3aa4213d63a42bdcf18f229df7e703f80c5aa
+  * vcpkg-cmake:x64-windows@2024-04-23 -- git+https://github.com/microsoft/vcpkg@e74aa1e8f93278a8e71372f1fa08c3df420eb840
+  * vcpkg-cmake-config:x64-windows@2024-05-23 -- git+https://github.com/microsoft/vcpkg@97a63e4bc1a17422ffe4eff71da53b4b561a7841
+  * zlib:x64-windows@1.3.1 -- git+https://github.com/microsoft/vcpkg@3f05e04b9aededb96786a911a16193cdb711f0c9
+Additional packages (*) will be modified to complete this operation.
+Restored 1 package(s) from C:\Users\Luka\AppData\Local\vcpkg\archives in 67 ms. Use --debug to see more details.
+Installing 1/4 vcpkg-cmake:x64-windows@2024-04-23...
+Building vcpkg-cmake:x64-windows@2024-04-23...
+C:\Users\Luka\AppData\Local\vcpkg\registries\git-trees\e74aa1e8f93278a8e71372f1fa08c3df420eb840: info: installing from git registry git+https://github.com/microsoft/vcpkg@e74aa1e8f93278a8e71372f1fa08c3df420eb840
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/vcpkg-cmake_x64-windows/share/vcpkg-cmake/vcpkg_cmake_configure.cmake
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/vcpkg-cmake_x64-windows/share/vcpkg-cmake/vcpkg_cmake_build.cmake
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/vcpkg-cmake_x64-windows/share/vcpkg-cmake/vcpkg_cmake_install.cmake
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/vcpkg-cmake_x64-windows/share/vcpkg-cmake/vcpkg-port-config.cmake
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/vcpkg-cmake_x64-windows/share/vcpkg-cmake/copyright
+-- Performing post-build validation
+Starting submission of vcpkg-cmake:x64-windows@2024-04-23 to 1 binary cache(s) in the background
+Elapsed time to handle vcpkg-cmake:x64-windows: 91.7 ms
+vcpkg-cmake:x64-windows package ABI: 1bc83a73a3feed6a04e6a95c1598dd0ab427f3f66c8d4fd0521807e1743f5552
+Installing 2/4 zlib:x64-windows@1.3.1...
+Building zlib:x64-windows@1.3.1...
+C:\Users\Luka\AppData\Local\vcpkg\registries\git-trees\3f05e04b9aededb96786a911a16193cdb711f0c9: info: installing from git registry git+https://github.com/microsoft/vcpkg@3f05e04b9aededb96786a911a16193cdb711f0c9
+-- Using cached madler-zlib-v1.3.1.tar.gz
+-- Extracting source C:/Users/Luka/AppData/Local/vcpkg/downloads/madler-zlib-v1.3.1.tar.gz
+-- Applying patch 0001-Prevent-invalid-inclusions-when-HAVE_-is-set-to-0.patch
+-- Applying patch 0002-build-static-or-shared-not-both.patch
+-- Applying patch 0003-android-and-mingw-fixes.patch
+-- Using source at C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/blds/zlib/src/v1.3.1-2e5db616bf.clean
+-- Configuring x64-windows
+-- Building x64-windows-dbg
+-- Building x64-windows-rel
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/share/zlib/vcpkg-cmake-wrapper.cmake
+-- Fixing pkgconfig file: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/lib/pkgconfig/zlib.pc
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.4.3-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.2-2-x86_64.pkg.tar.zst
+-- Using msys root at C:/Users/Luka/AppData/Local/vcpkg/downloads/tools/msys2/9272adbcaf19caef
+-- Fixing pkgconfig file: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/debug/lib/pkgconfig/zlib.pc
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/share/zlib/copyright
+-- Performing post-build validation
+Starting submission of zlib:x64-windows@1.3.1 to 1 binary cache(s) in the background
+Elapsed time to handle zlib:x64-windows: 4.4 s
+zlib:x64-windows package ABI: 650d06d01c37aebb16f588d1d488fa67a0eab3fbe3949a237fd23b7d50a11d5b
+Completed submission of vcpkg-cmake:x64-windows@2024-04-23 to 1 binary cache(s) in 30.5 ms
+Installing 3/4 vcpkg-cmake-config:x64-windows@2024-05-23...
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 93.9 ms
+vcpkg-cmake-config:x64-windows package ABI: e1e16badcb4fd03fd5542d291c1475f647b5b30ea13ac9e8ed2412ea3b6115f2
+Installing 4/4 libpng:x64-windows@1.6.53...
+Building libpng:x64-windows@1.6.53...
+C:\Users\Luka\AppData\Local\vcpkg\registries\git-trees\6bf3aa4213d63a42bdcf18f229df7e703f80c5aa: info: installing from git registry git+https://github.com/microsoft/vcpkg@6bf3aa4213d63a42bdcf18f229df7e703f80c5aa
+Downloading https://github.com/pnggroup/libpng/archive/v1.6.53.tar.gz -> pnggroup-libpng-v1.6.53.tar.gz
+Successfully downloaded pnggroup-libpng-v1.6.53.tar.gz
+-- Extracting source C:/Users/Luka/AppData/Local/vcpkg/downloads/pnggroup-libpng-v1.6.53.tar.gz
+-- Applying patch cmake.patch
+-- Using source at C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/blds/libpng/src/v1.6.53-b98b476139.clean
+-- Configuring x64-windows
+-- Building x64-windows-dbg
+-- Building x64-windows-rel
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/share/png/vcpkg-cmake-wrapper.cmake
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/share/libpng/libpng-config.cmake
+-- Fixing pkgconfig file: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/lib/pkgconfig/libpng16.pc
+-- Using cached msys2-mingw-w64-x86_64-pkgconf-1~2.4.3-1-any.pkg.tar.zst
+-- Using cached msys2-msys2-runtime-3.6.2-2-x86_64.pkg.tar.zst
+-- Using msys root at C:/Users/Luka/AppData/Local/vcpkg/downloads/tools/msys2/9272adbcaf19caef
+-- Fixing pkgconfig file: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/debug/lib/pkgconfig/libpng16.pc
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/debug/lib/pkgconfig/libpng.pc
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/lib/pkgconfig/libpng.pc
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/share/libpng/usage
+-- Installing: C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/libpng_x64-windows/share/libpng/copyright
+-- Performing post-build validation
+Starting submission of libpng:x64-windows@1.6.53 to 1 binary cache(s) in the background
+Elapsed time to handle libpng:x64-windows: 6.5 s
+libpng:x64-windows package ABI: ae6241520d500e8f96b41a67b18bddfcda8412e3c68e9cd0014121ad59804367
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Packages installed in this vcpkg installation declare the following licenses:
+MIT
+Zlib
+libpng-2.0
+libpng provides CMake targets:
+
+  find_package(PNG REQUIRED)
+  target_link_libraries(main PRIVATE PNG::PNG)
+
+Completed submission of zlib:x64-windows@1.3.1 to 1 binary cache(s) in 106 ms
+Waiting for 1 remaining binary cache submissions...
+Completed submission of libpng:x64-windows@1.6.53 to 1 binary cache(s) in 137 ms (1/1)
+All requested installations completed successfully in: 11 s

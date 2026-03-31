@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/blds/libpng/x64-windows-dbg/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

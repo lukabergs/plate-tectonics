@@ -112,52 +112,52 @@ bool stats_match(const HeightmapStats& actual, const HeightmapStats& expected,
     return extrema_ok && central_ok;
 }
 
-// Save heightmap as PNG image for visual comparison
+// Save heightmap as bitmap image for visual comparison
 void save_heightmap_png(const float* heightmap, uint32_t width, uint32_t height,
                         const char* filename, bool use_colors = true) {
-    std::cout << "  [PNG] Entering save_heightmap_png for " << filename << std::endl;
+    std::cout << "  [IMG] Entering save_heightmap_png for " << filename << std::endl;
 
     // Validate inputs
     if (heightmap == nullptr || width == 0 || height == 0) {
-        std::cerr << "  [PNG] ERROR: Invalid parameters for PNG generation" << std::endl;
+        std::cerr << "  [IMG] ERROR: Invalid parameters for image generation" << std::endl;
         return;
     }
-    std::cout << "  [PNG] Validated inputs: width=" << width << ", height=" << height << std::endl;
+    std::cout << "  [IMG] Validated inputs: width=" << width << ", height=" << height << std::endl;
 
     // Create a normalized copy for visualization
     size_t map_size = static_cast<size_t>(width) * static_cast<size_t>(height);
-    std::cout << "  [PNG] Allocating normalized array of size " << map_size << std::endl;
+    std::cout << "  [IMG] Allocating normalized array of size " << map_size << std::endl;
     float* normalized = new float[map_size];
 
-    std::cout << "  [PNG] Copying heightmap data..." << std::endl;
+    std::cout << "  [IMG] Copying heightmap data..." << std::endl;
     std::memcpy(normalized, heightmap, sizeof(float) * map_size);
 
-    std::cout << "  [PNG] Normalizing data..." << std::endl;
+    std::cout << "  [IMG] Normalizing data..." << std::endl;
     normalize(normalized, static_cast<int>(map_size));
 
     // Write the image (cast dimensions to int for API compatibility)
     int w = static_cast<int>(width);
     int h = static_cast<int>(height);
-    std::cout << "  [PNG] Writing image: w=" << w << ", h=" << h << ", use_colors=" << use_colors << std::endl;
+    std::cout << "  [IMG] Writing image: w=" << w << ", h=" << h << ", use_colors=" << use_colors << std::endl;
 
     int result = 0;
     if (use_colors) {
-        std::cout << "  [PNG] Calling writeImageColors..." << std::endl;
+        std::cout << "  [IMG] Calling writeImageColors..." << std::endl;
         result = writeImageColors(filename, w, h, normalized, "Regression Test Output");
     } else {
-        std::cout << "  [PNG] Calling writeImageGray..." << std::endl;
+        std::cout << "  [IMG] Calling writeImageGray..." << std::endl;
         result = writeImageGray(filename, w, h, normalized, "Regression Test Output");
     }
 
     if (result != 0) {
-        std::cerr << "  [PNG] ERROR: Failed to write PNG file: " << filename << " (result=" << result << ")" << std::endl;
+        std::cerr << "  [IMG] ERROR: Failed to write image file: " << filename << " (result=" << result << ")" << std::endl;
     } else {
-        std::cout << "  [PNG] Successfully wrote " << filename << std::endl;
+        std::cout << "  [IMG] Successfully wrote " << filename << std::endl;
     }
 
-    std::cout << "  [PNG] Cleaning up normalized array..." << std::endl;
+    std::cout << "  [IMG] Cleaning up normalized array..." << std::endl;
     delete[] normalized;
-    std::cout << "  [PNG] Exiting save_heightmap_png" << std::endl;
+    std::cout << "  [IMG] Exiting save_heightmap_png" << std::endl;
 }
 
 } // anonymous namespace
@@ -196,18 +196,18 @@ TEST(Regression, SimulationSeed12345_OutputConsistency) {
     ASSERT_NE(final_map, nullptr);
     HeightmapStats final_stats = compute_stats(final_map, map_size);
 
-    // Save PNG images for visual comparison (before cleanup)
+    // Save image artifacts for visual comparison (before cleanup)
     // These will be collected as artifacts in CI for cross-platform comparison
-    std::cout << "Saving PNG artifacts..." << std::endl;
+    std::cout << "Saving image artifacts..." << std::endl;
     try {
         save_heightmap_png(initial_map_copy, width, height, "regression_seed12345_initial.png");
-        std::cout << "  Initial PNG saved successfully" << std::endl;
+        std::cout << "  Initial image saved successfully" << std::endl;
         save_heightmap_png(final_map, width, height, "regression_seed12345_final.png");
-        std::cout << "  Final PNG saved successfully" << std::endl;
+        std::cout << "  Final image saved successfully" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "Exception during PNG generation: " << e.what() << std::endl;
+        std::cerr << "Exception during image generation: " << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "Unknown exception during PNG generation" << std::endl;
+        std::cerr << "Unknown exception during image generation" << std::endl;
     }
 
     // Clean up

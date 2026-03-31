@@ -1,4 +1,12 @@
 cmake_minimum_required (VERSION 3.10)
+
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+    set(_vcpkg_toolchain "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+    if(EXISTS "${_vcpkg_toolchain}")
+        set(CMAKE_TOOLCHAIN_FILE "${_vcpkg_toolchain}" CACHE STRING "Vcpkg toolchain file")
+    endif()
+endif()
+
 project (PlateTectonics)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -60,10 +68,14 @@ include_directories("src")
 # - https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library
 #
 if(MSVC)
-	# Default to statically-linked runtime.
-	# NOTE: Override with -DMSVC_RUNTIME=dynamic when using vcpkg!
+	# vcpkg-provided libraries are built with /MD by default, so follow that
+	# automatically when the vcpkg toolchain is active.
 	if("${MSVC_RUNTIME}" STREQUAL "")
-  		set(MSVC_RUNTIME "static")
+        if(DEFINED CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+  		    set(MSVC_RUNTIME "dynamic")
+        else()
+  		    set(MSVC_RUNTIME "static")
+        endif()
 	endif()
 	# Set compiler options.
 	set(variables

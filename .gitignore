@@ -1,3 +1,5 @@
+img/
+_deps/
 *.png
 .DS_Store
 

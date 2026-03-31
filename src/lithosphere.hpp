@@ -83,6 +83,10 @@ class lithosphere {
     lithosphere(long seed, uint32_t width, uint32_t height, float sea_level,
                 uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
                 float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates) noexcept(false);
+    lithosphere(long seed, uint32_t width, uint32_t height, const float* heightmap,
+                float sea_level, uint32_t _erosion_period, float _folding_ratio,
+                uint32_t aggr_ratio_abs, float aggr_ratio_rel, uint32_t num_cycles,
+                uint32_t _max_plates) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -116,6 +120,9 @@ class lithosphere {
 
   protected:
   private:
+    void initializePlates();
+    void initializeTopography(const float* height_samples, const WorldDimension& source_dimension,
+                              float sea_level, bool preserve_relief);
     void createNoise(float* tmp, const WorldDimension& tmpDim, bool useSimplex = false);
     void createSlowNoise(float* tmp, const WorldDimension& tmpDim);
     void updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
@@ -183,6 +190,7 @@ class lithosphere {
 
     const WorldDimension _worldDimension;
     SimpleRandom _randsource;
+    bool imported_heightmap_mode;
     int _steps;
 };
 

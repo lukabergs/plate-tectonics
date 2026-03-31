@@ -1,0 +1,13 @@
+C:\dev\plate-tectonics\test\test_acceptance.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_acceptance.obj
+C:\dev\plate-tectonics\test\test_heightmap.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_heightmap.obj
+C:\dev\plate-tectonics\test\test_input_heightmap.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_input_heightmap.obj
+C:\dev\plate-tectonics\test\test_plate.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_plate.obj
+C:\dev\plate-tectonics\test\test_rectangle.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_rectangle.obj
+C:\dev\plate-tectonics\test\test_sqrdmd.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_sqrdmd.obj
+C:\dev\plate-tectonics\test\test_randomness.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_randomness.obj
+C:\dev\plate-tectonics\test\test_portability.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_portability.obj
+C:\dev\plate-tectonics\test\test_bounds.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_bounds.obj
+C:\dev\plate-tectonics\test\test_mass.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_mass.obj
+C:\dev\plate-tectonics\test\test_movement.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_movement.obj
+C:\dev\plate-tectonics\test\test_regression.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\test_regression.obj
+C:\dev\plate-tectonics\examples\map_drawing.cpp;C:\dev\plate-tectonics\build-png\test\PlateTectonicsTests.dir\Release\map_drawing.obj

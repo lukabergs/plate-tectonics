@@ -23,6 +23,7 @@
 #include "simplexnoise.hpp"
 #include "sqrdmd.hpp"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -46,12 +47,264 @@ static const float RESTART_SPEED_LIMIT = 2.0f;
 static const uint32_t RESTART_ITERATIONS = 600;
 static const uint32_t NO_COLLISION_TIME_LIMIT = 10;
 
+namespace {
+
+uint32_t seam_hash(uint32_t x, uint32_t y, uint32_t iteration, uint32_t salt)
+{
+    uint32_t h = x * 73856093U;
+    h ^= y * 19349663U;
+    h ^= iteration * 83492791U;
+    h ^= salt * 2654435761U;
+    h = (h ^ (h >> 13U)) * 1274126177U;
+    return h ^ (h >> 16U);
+}
+
+float seam_noise(uint32_t x, uint32_t y, uint32_t iteration, uint32_t salt)
+{
+    const uint32_t h = seam_hash(x, y, iteration, salt);
+    return (static_cast<float>(h & 1023U) / 511.5f) - 1.0f;
+}
+
+void choose_regenerated_gap_fill(const WorldDimension& world_dimension, const IndexMap& current_imap,
+                                 const IndexMap& previous_imap, const HeightMap& current_hmap,
+                                 uint32_t x, uint32_t y, uint32_t num_plates,
+                                 uint32_t iteration_count, std::vector<float>& owner_scores,
+                                 std::vector<float>& owner_height_sums,
+                                 std::vector<uint32_t>& owner_height_counts,
+                                 uint32_t* owner_out, float* height_out)
+{
+    ASSERT(owner_out != nullptr && height_out != nullptr, "gap fill outputs must not be null");
+    ASSERT(owner_scores.size() >= num_plates, "owner score buffer too small");
+    ASSERT(owner_height_sums.size() >= num_plates, "owner height buffer too small");
+    ASSERT(owner_height_counts.size() >= num_plates, "owner count buffer too small");
+
+    std::fill(owner_scores.begin(), owner_scores.end(), 0.0f);
+    std::fill(owner_height_sums.begin(), owner_height_sums.end(), 0.0f);
+    std::fill(owner_height_counts.begin(), owner_height_counts.end(), 0U);
+
+    const uint32_t world_index = world_dimension.indexOf(x, y);
+    const uint32_t previous_owner = previous_imap[world_index];
+
+    auto add_candidate = [&](uint32_t plate, float weight, float local_height, bool collect_height) {
+        if (plate >= num_plates || weight <= 0.0f) {
+            return;
+        }
+
+        owner_scores[plate] += weight;
+        if (collect_height && local_height > 0.0f) {
+            owner_height_sums[plate] += local_height;
+            owner_height_counts[plate] += 1U;
+        }
+    };
+
+    for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            if (dx == 0 && dy == 0) {
+                continue;
+            }
+
+            const int abs_dx = std::abs(dx);
+            const int abs_dy = std::abs(dy);
+            const int distance = abs_dx > abs_dy ? abs_dx : abs_dy;
+            const bool cardinal = dx == 0 || dy == 0;
+            const float current_weight =
+                (distance == 1) ? (cardinal ? 7.0f : 5.0f) : (cardinal ? 3.5f : 2.2f);
+            const uint32_t neighbour_index =
+                world_dimension.normalizedIndexOf(static_cast<uint32_t>(x + dx),
+                                                  static_cast<uint32_t>(y + dy));
+            add_candidate(current_imap[neighbour_index], current_weight,
+                          current_hmap[neighbour_index], true);
+            add_candidate(previous_imap[neighbour_index], current_weight * 0.35f, 0.0f, false);
+        }
+    }
+
+    if (previous_owner < num_plates) {
+        owner_scores[previous_owner] += 1.4f;
+    }
+
+    uint32_t best_owner = previous_owner < num_plates ? previous_owner : 0xFFFFFFFFU;
+    float best_score = -FLT_MAX;
+    for (uint32_t plate = 0; plate < num_plates; ++plate) {
+        if (owner_scores[plate] <= 0.0f) {
+            continue;
+        }
+
+        float score = owner_scores[plate];
+        if (previous_owner == plate) {
+            score += 0.7f;
+        }
+        score += 0.45f * seam_noise(x, y, iteration_count, plate + 1U);
+
+        if (owner_height_counts[plate] > 0U) {
+            const float local_mean = owner_height_sums[plate] /
+                                     static_cast<float>(owner_height_counts[plate]);
+            const float capped_mean =
+                local_mean < CONTINENTAL_BASE ? local_mean : CONTINENTAL_BASE;
+            const float ocean_bias =
+                std::clamp((CONTINENTAL_BASE - capped_mean) / CONTINENTAL_BASE, 0.0f, 1.0f);
+            score += 0.8f * ocean_bias;
+        }
+
+        if (score > best_score) {
+            best_score = score;
+            best_owner = plate;
+        }
+    }
+
+    if (best_owner >= num_plates) {
+        best_owner = previous_owner;
+    }
+    if (best_owner >= num_plates) {
+        for (int dy = -1; dy <= 1 && best_owner >= num_plates; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                const uint32_t neighbour_index =
+                    world_dimension.normalizedIndexOf(static_cast<uint32_t>(x + dx),
+                                                      static_cast<uint32_t>(y + dy));
+                if (current_imap[neighbour_index] < num_plates) {
+                    best_owner = current_imap[neighbour_index];
+                    break;
+                }
+                if (previous_imap[neighbour_index] < num_plates) {
+                    best_owner = previous_imap[neighbour_index];
+                }
+            }
+        }
+    }
+
+    if (best_owner >= num_plates) {
+        *owner_out = previous_owner;
+        *height_out = OCEANIC_BASE * BUOYANCY_BONUS_X;
+        return;
+    }
+
+    float regenerated_height = OCEANIC_BASE * BUOYANCY_BONUS_X;
+    float local_height_sum = 0.0f;
+    uint32_t local_height_count = 0U;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) {
+                continue;
+            }
+
+            const uint32_t neighbour_index =
+                world_dimension.normalizedIndexOf(static_cast<uint32_t>(x + dx),
+                                                  static_cast<uint32_t>(y + dy));
+            if (current_imap[neighbour_index] != best_owner) {
+                continue;
+            }
+
+            local_height_sum += std::clamp(current_hmap[neighbour_index], OCEANIC_BASE,
+                                           OCEANIC_BASE * BUOYANCY_BONUS_X);
+            local_height_count += 1U;
+        }
+    }
+
+    if (local_height_count > 0U) {
+        regenerated_height = regenerated_height * 0.55f +
+                             (local_height_sum / static_cast<float>(local_height_count)) * 0.45f;
+    }
+
+    regenerated_height *=
+        0.88f + 0.16f * seam_noise(x, y, iteration_count, best_owner + 17U);
+    regenerated_height = std::clamp(regenerated_height, OCEANIC_BASE * 1.6f,
+                                    OCEANIC_BASE * 2.6f);
+
+    *owner_out = best_owner;
+    *height_out = regenerated_height;
+}
+
+} // namespace
+
 uint32_t findBound(const uint32_t* map, uint32_t length, uint32_t x0, uint32_t y0, int dx, int dy);
 uint32_t findPlate(plate** plates, float x, float y, uint32_t num_plates);
 
 WorldPoint lithosphere::randomPosition() {
     return WorldPoint(_randsource.next() % _worldDimension.getWidth(),
                       _randsource.next() % _worldDimension.getHeight(), _worldDimension);
+}
+
+void lithosphere::initializeTopography(const float* height_samples,
+                                       const WorldDimension& source_dimension, float sea_level,
+                                       bool preserve_relief) {
+    if (height_samples == nullptr) {
+        throw runtime_error("Heightmap input cannot be null");
+    }
+    if (source_dimension.getWidth() < _worldDimension.getWidth() ||
+        source_dimension.getHeight() < _worldDimension.getHeight()) {
+        throw runtime_error("Source heightmap dimensions must cover the world dimensions");
+    }
+
+    const uint32_t area = source_dimension.getArea();
+    std::vector<float> normalized(height_samples, height_samples + area);
+
+    const auto [lowest_it, highest_it] = std::minmax_element(normalized.begin(), normalized.end());
+    const float lowest = *lowest_it;
+    const float highest = *highest_it;
+    if (highest > lowest) {
+        const float inv_range = 1.0f / (highest - lowest);
+        for (uint32_t i = 0; i < area; ++i) {
+            normalized[i] = (normalized[i] - lowest) * inv_range;
+        }
+    } else {
+        std::fill(normalized.begin(), normalized.end(), 0.0f);
+    }
+
+    float sea_threshold = 0.5f;
+    float th_step = 0.5f;
+    while (th_step > 0.01f) {
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < area; ++i) {
+            count += (normalized[i] < sea_threshold);
+        }
+
+        th_step *= 0.5f;
+        if (count / static_cast<float>(area) < sea_level) {
+            sea_threshold += th_step;
+        } else {
+            sea_threshold -= th_step;
+        }
+    }
+
+    if (preserve_relief) {
+        const float sea_range = (sea_threshold > 0.0001f) ? sea_threshold : 0.0001f;
+        const float land_range =
+            (1.0f - sea_threshold > 0.0001f) ? (1.0f - sea_threshold) : 0.0001f;
+
+        for (uint32_t i = 0; i < area; ++i) {
+            if (normalized[i] <= sea_threshold) {
+                const float ocean_relative = std::pow(normalized[i] / sea_range, 1.15f);
+                normalized[i] = 0.02f + ocean_relative * 0.33f;
+            } else {
+                const float land_relative =
+                    std::pow((normalized[i] - sea_threshold) / land_range, 0.85f);
+                normalized[i] = CONTINENTAL_BASE + land_relative;
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < area; ++i) {
+            normalized[i] =
+                (normalized[i] > sea_threshold) ? normalized[i] + CONTINENTAL_BASE : OCEANIC_BASE;
+        }
+    }
+
+    for (uint32_t y = 0; y < _worldDimension.getHeight(); ++y) {
+        memcpy(&hmap[_worldDimension.lineIndex(y)], &normalized[source_dimension.lineIndex(y)],
+               _worldDimension.getWidth() * sizeof(float));
+    }
+}
+
+void lithosphere::initializePlates() {
+    collisions.resize(max_plates);
+    subductions.resize(max_plates);
+
+    plates = new plate*[max_plates];
+    for (uint32_t i = 0; i < max_plates; ++i) {
+        plate_areas[i].border.reserve(8);
+    }
+    createPlates();
 }
 
 void lithosphere::createNoise(float* tmp, const WorldDimension& tmpDim, bool useSimplex) {
@@ -71,7 +324,8 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
       erosion_period(_erosion_period), folding_ratio(_folding_ratio), iter_count(0),
       max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
-      _worldDimension(width, height), _randsource(seed), _steps(0) {
+      _worldDimension(width, height), _randsource(seed), imported_heightmap_mode(false),
+      _steps(0) {
     if (width < 5 || height < 5) {
         throw runtime_error("Width and height should be >=5");
     }
@@ -81,58 +335,28 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
     float* tmp = new float[A];
 
     createSlowNoise(tmp, tmpDim);
-
-    float lowest = tmp[0], highest = tmp[0];
-    for (uint32_t i = 1; i < A; ++i) {
-        lowest = lowest < tmp[i] ? lowest : tmp[i];
-        highest = highest > tmp[i] ? highest : tmp[i];
-    }
-
-    for (uint32_t i = 0; i < A; ++i) // Scale to [0 ... 1]
-        tmp[i] = (tmp[i] - lowest) / (highest - lowest);
-
-    float sea_threshold = 0.5;
-    float th_step = 0.5;
-
-    // Find the actual value in height map that produces the continent-sea
-    // ratio defined be "sea_level".
-    while (th_step > 0.01) {
-        uint32_t count = 0;
-        for (uint32_t i = 0; i < A; ++i)
-            count += (tmp[i] < sea_threshold);
-
-        th_step *= 0.5;
-        if (count / (float)A < sea_level)
-            sea_threshold += th_step;
-        else
-            sea_threshold -= th_step;
-    }
-
-    sea_level = sea_threshold;
-    for (uint32_t i = 0; i < A; ++i) // Genesis 1:9-10.
-    {
-        tmp[i] = (tmp[i] > sea_level) * (tmp[i] + CONTINENTAL_BASE) +
-                 (tmp[i] <= sea_level) * OCEANIC_BASE;
-    }
-
-    // Scalp the +1 away from map side to get a power of two side length!
-    // Practically only the redundant map edges become removed.
-    for (uint32_t y = 0; y < _worldDimension.getHeight(); ++y) {
-        memcpy(&hmap[_worldDimension.lineIndex(y)], &tmp[tmpDim.lineIndex(y)],
-               _worldDimension.getWidth() * sizeof(float));
-    }
-
+    initializeTopography(tmp, tmpDim, sea_level, false);
     delete[] tmp;
+    initializePlates();
+}
 
-    collisions.resize(max_plates);
-    subductions.resize(max_plates);
-
-    // Create default plates
-    plates = new plate*[max_plates];
-    for (uint32_t i = 0; i < max_plates; i++) {
-        plate_areas[i].border.reserve(8);
+lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, const float* heightmap,
+                         float sea_level, uint32_t _erosion_period, float _folding_ratio,
+                         uint32_t aggr_ratio_abs, float aggr_ratio_rel, uint32_t num_cycles,
+                         uint32_t _max_plates) noexcept(false)
+    : hmap(width, height), imap(width, height), prev_imap(width, height), amap(width, height),
+      plates(nullptr), plate_areas(_max_plates), plate_indices_found(_max_plates),
+      aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
+      erosion_period(_erosion_period), folding_ratio(_folding_ratio), iter_count(0),
+      max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
+      _worldDimension(width, height), _randsource(seed), imported_heightmap_mode(true),
+      _steps(0) {
+    if (width < 5 || height < 5) {
+        throw runtime_error("Width and height should be >=5");
     }
-    createPlates();
+
+    initializeTopography(heightmap, _worldDimension, sea_level, true);
+    initializePlates();
 }
 
 lithosphere::~lithosphere() throw() {
@@ -611,6 +835,32 @@ void lithosphere::update() {
         updateCollisions();
 
         fill(plate_indices_found.begin(), plate_indices_found.end(), 0);
+        std::vector<uint32_t> regenerated_owner;
+        std::vector<float> regenerated_height;
+        std::vector<float> owner_scores;
+        std::vector<float> owner_height_sums;
+        std::vector<uint32_t> owner_height_counts;
+
+        if (imported_heightmap_mode) {
+            regenerated_owner.assign(map_area, 0xFFFFFFFFU);
+            regenerated_height.assign(map_area, 0.0f);
+            owner_scores.resize(num_plates);
+            owner_height_sums.resize(num_plates);
+            owner_height_counts.resize(num_plates);
+
+            for (uint32_t y = 0, i = 0; y < _worldDimension.getHeight(); ++y) {
+                for (uint32_t x = 0; x < _worldDimension.getWidth(); ++x, ++i) {
+                    if (imap[i] < num_plates) {
+                        continue;
+                    }
+
+                    choose_regenerated_gap_fill(
+                        _worldDimension, imap, prev_imap, hmap, x, y, num_plates, iter_count,
+                        owner_scores, owner_height_sums, owner_height_counts, &regenerated_owner[i],
+                        &regenerated_height[i]);
+                }
+            }
+        }
 
         // Fill divergent boundaries with new crustal material, molten magma.
         for (uint32_t y = 0, i = 0; y < BOOL_REGENERATE_CRUST * _worldDimension.getHeight(); ++y) {
@@ -618,14 +868,32 @@ void lithosphere::update() {
                 if (imap[i] >= num_plates) {
                     // The owner of this new crust is that neighbour plate
                     // who was located at this point before plates moved.
-                    imap[i] = prev_imap[i];
+                    if (imported_heightmap_mode && i < regenerated_owner.size() &&
+                        regenerated_owner[i] < num_plates) {
+                        imap[i] = regenerated_owner[i];
+                    } else {
+                        imap[i] = prev_imap[i];
+                    }
 
                     // If this is oceanic crust then add buoyancy to it.
                     // Magma that has just crystallized into oceanic crust
                     // is more buoyant than that which has had a lot of
                     // time to cool down and become more dense.
-                    amap[i] = iter_count;
-                    hmap[i] = OCEANIC_BASE * BUOYANCY_BONUS_X;
+                    if (imported_heightmap_mode && imap[i] < num_plates) {
+                        const float age_noise =
+                            seam_noise(x, y, iter_count, static_cast<uint32_t>(imap[i]) + 31U);
+                        const uint32_t age_offset =
+                            4U + static_cast<uint32_t>((age_noise + 1.0f) * 3.5f);
+                        amap[i] = iter_count > age_offset ? iter_count - age_offset : 0U;
+                    } else {
+                        amap[i] = iter_count;
+                    }
+                    if (imported_heightmap_mode && i < regenerated_height.size() &&
+                        regenerated_owner[i] < num_plates) {
+                        hmap[i] = regenerated_height[i];
+                    } else {
+                        hmap[i] = OCEANIC_BASE * BUOYANCY_BONUS_X;
+                    }
 
                     // This should probably not happen
                     if (imap[i] < num_plates) {

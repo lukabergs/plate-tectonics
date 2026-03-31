@@ -1,0 +1,2 @@
+C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/debug/lib/zlibd.lib
+C:/dev/plate-tectonics/build-png/vcpkg_installed/vcpkg/pkgs/zlib_x64-windows/debug/bin/zlibd1.dll

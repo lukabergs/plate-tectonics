@@ -58,6 +58,14 @@ cmake ..
 cmake --build .
 ```
 
+On Windows, the repository uses `vcpkg.json` manifest mode to fetch `libpng`
+automatically. A fresh configure like this is the intended path:
+
+```powershell
+cmake -S . -B build -DWITH_EXAMPLES=ON -DMSVC_RUNTIME=dynamic
+cmake --build build --config Release
+```
+
 If you want to build also the examples run:
 
 ```
@@ -78,8 +86,6 @@ cmake --help
 Running the examples (C++)
 ==========================
 
-To run also the examples you need to install the library libpng.
-
 From the root directory run:
 
 ```bash
@@ -90,6 +96,48 @@ make
 cd examples
 ./simulation
 ```
+
+The example writes `.png` files.
+
+The default CLI is deterministic. If you do not pass `-s` / `--seed`, it uses seed `1`.
+
+You can also seed the simulation from an image heightmap:
+
+```bash
+./simulation --input-image input.png --filename transformed
+./simulation --input-image input.png --grayscale --show-fault-lines --filename transformed
+```
+
+Input image rules:
+
+* PNG input is supported
+* RGB images are converted to grayscale using luminance
+* Black = low terrain, white = high terrain
+* `sea_level` still determines how much of the image becomes ocean vs land
+* In image mode, the defaults are tuned down to `4` plates, `1` cycle, and `0` erosion
+
+Useful knobs:
+
+* `--num-plates N`
+* `--cycle-count N`
+* `--erosion-period N`
+* `--sea-level F`
+* `--folding-ratio F`
+* `--aggr-overlap-abs N`
+* `--aggr-overlap-rel F`
+* `--progress-interval N`
+* `--step N`
+* `--show-fault-lines` writes additional `*_faults.png` files
+
+`--cycle-count` is the number of tectonic lifetimes the simulation is allowed to
+run. When plate motion stalls or the system cools down too much, the library can
+restart with a fresh split of plates and continue from the updated world.
+
+Fault line colors in `*_faults.png`:
+
+* convergent = red
+* divergent = cyan
+* transform = magenta
 
 How to run tests (C++)
 ======================

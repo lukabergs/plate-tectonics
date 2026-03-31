@@ -14,17 +14,15 @@ FetchContent_MakeAvailable(googletest)
 
 project (PlateTectonicsTests)
 
-# Find PNG for regression test artifacts
-set(CMAKE_FIND_FRAMEWORK LAST)
 find_package(PNG REQUIRED)
 
-add_executable(PlateTectonicsTests test_acceptance.cpp test_heightmap.cpp test_plate.cpp test_rectangle.cpp test_sqrdmd.cpp test_randomness.cpp test_portability.cpp test_bounds.cpp test_mass.cpp test_movement.cpp test_regression.cpp ../examples/map_drawing.cpp)
+add_executable(PlateTectonicsTests test_acceptance.cpp test_heightmap.cpp test_input_heightmap.cpp test_plate.cpp test_rectangle.cpp test_sqrdmd.cpp test_randomness.cpp test_portability.cpp test_bounds.cpp test_mass.cpp test_movement.cpp test_regression.cpp ../examples/map_drawing.cpp)
 
 add_test(NAME PlateTectonicsTests COMMAND PlateTectonicsTests)
 # Set working directory for tests to the build root so PNG artifacts are written to a known location
 set_tests_properties(PlateTectonicsTests PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-include_directories("../src" "../examples" ${PNG_INCLUDE_DIRS})
+include_directories("../src" "../examples")
 
 # Standard linking to gtest stuff.
 target_link_libraries(PlateTectonicsTests gtest gtest_main)

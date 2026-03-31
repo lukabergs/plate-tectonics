@@ -54,6 +54,21 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
     return litho;
 }
 
+void* platec_api_create_from_heightmap(long seed, uint32_t width, uint32_t height,
+                                       const float* heightmap, float sea_level,
+                                       uint32_t erosion_period, float folding_ratio,
+                                       uint32_t aggr_overlap_abs, float aggr_overlap_rel,
+                                       uint32_t cycle_count, uint32_t num_plates) {
+    lithosphere* litho =
+        new lithosphere(seed, width, height, heightmap, sea_level, erosion_period, folding_ratio,
+                        aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates);
+
+    platec_api_list_elem elem(++last_id, litho);
+    lithospheres.push_back(elem);
+
+    return litho;
+}
+
 void platec_api_destroy(void* litho) {
     for (uint32_t i = 0; i < lithospheres.size(); ++i)
         if (lithospheres[i].data == litho) {
@@ -80,6 +95,21 @@ uint32_t* platec_api_get_platesmap(void* pointer) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     uint32_t* res = litho->getPlatesMap();
     return res;
+}
+
+uint32_t platec_api_get_plate_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getPlateCount();
+}
+
+uint32_t platec_api_get_cycle_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getCycleCount();
+}
+
+uint32_t platec_api_get_iteration_count(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getIterationCount();
 }
 
 lithosphere* platec_api_get_lithosphere(uint32_t id) {

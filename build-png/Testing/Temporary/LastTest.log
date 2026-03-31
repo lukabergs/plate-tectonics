@@ -1,0 +1,223 @@
+Start testing: Mar 31 16:59 Hora de verano romance
+----------------------------------------------------------
+1/1 Testing: PlateTectonicsTests
+1/1 Test: PlateTectonicsTests
+Command: "C:/dev/plate-tectonics/build-png/test/Release/PlateTectonicsTests.exe"
+Directory: C:/dev/plate-tectonics/build-png
+"PlateTectonicsTests" start time: Mar 31 16:59 Hora de verano romance
+Output:
+----------------------------------------------------------
+[==========] Running 57 tests from 14 test suites.
+[----------] Global test environment set-up.
+[----------] 7 tests from HeightMap
+[ RUN      ] HeightMap.ConstructorWidthHeight
+[       OK ] HeightMap.ConstructorWidthHeight (0 ms)
+[ RUN      ] HeightMap.Area
+[       OK ] HeightMap.Area (0 ms)
+[ RUN      ] HeightMap.SetAndGet
+[       OK ] HeightMap.SetAndGet (0 ms)
+[ RUN      ] HeightMap.CopyConstructor
+[       OK ] HeightMap.CopyConstructor (0 ms)
+[ RUN      ] HeightMap.AssignmentOperator
+[       OK ] HeightMap.AssignmentOperator (0 ms)
+[ RUN      ] HeightMap.SetAll
+[       OK ] HeightMap.SetAll (0 ms)
+[ RUN      ] HeightMap.IndexedAccessOperatorFromIndex
+[       OK ] HeightMap.IndexedAccessOperatorFromIndex (0 ms)
+[----------] 7 tests from HeightMap (0 ms total)
+
+[----------] 2 tests from InputHeightmap
+[ RUN      ] InputHeightmap.CreateFromHeightmapUsesProvidedTerrain
+[       OK ] InputHeightmap.CreateFromHeightmapUsesProvidedTerrain (0 ms)
+[ RUN      ] InputHeightmap.LoadImageReadsBackGrayscaleLuminance
+[       OK ] InputHeightmap.LoadImageReadsBackGrayscaleLuminance (3 ms)
+[----------] 2 tests from InputHeightmap (3 ms total)
+
+[----------] 1 test from SimpleRandom
+[ RUN      ] SimpleRandom.NextRepeatability
+[       OK ] SimpleRandom.NextRepeatability (0 ms)
+[----------] 1 test from SimpleRandom (0 ms total)
+
+[----------] 2 tests from Noise
+[ RUN      ] Noise.SimplexRawNoiseRepeatability
+[       OK ] Noise.SimplexRawNoiseRepeatability (0 ms)
+[ RUN      ] Noise.SimplexNoiseRepeatability
+[       OK ] Noise.SimplexNoiseRepeatability (23 ms)
+[----------] 2 tests from Noise (23 ms total)
+
+[----------] 2 tests from CreatePlate
+[ RUN      ] CreatePlate.SquareDoesNotExplode
+[       OK ] CreatePlate.SquareDoesNotExplode (33 ms)
+[ RUN      ] CreatePlate.NotSquareDoesNotExplode
+[       OK ] CreatePlate.NotSquareDoesNotExplode (67 ms)
+[----------] 2 tests from CreatePlate (100 ms total)
+
+[----------] 4 tests from Plate
+[ RUN      ] Plate.calculateCrust
+[       OK ] Plate.calculateCrust (27 ms)
+[ RUN      ] Plate.addCollision
+[       OK ] Plate.addCollision (27 ms)
+[ RUN      ] Plate.addCrustByCollision
+[       OK ] Plate.addCrustByCollision (27 ms)
+[ RUN      ] Plate.addCrustBySubduction
+[       OK ] Plate.addCrustBySubduction (26 ms)
+[----------] 4 tests from Plate (108 ms total)
+
+[----------] 5 tests from Rectangle
+[ RUN      ] Rectangle.MapIndexInsideRectNotWrapping
+[       OK ] Rectangle.MapIndexInsideRectNotWrapping (0 ms)
+[ RUN      ] Rectangle.MapIndexOutsideRect
+[       OK ] Rectangle.MapIndexOutsideRect (0 ms)
+[ RUN      ] Rectangle.MapIndexInsideRectWrappingOnX
+[       OK ] Rectangle.MapIndexInsideRectWrappingOnX (0 ms)
+[ RUN      ] Rectangle.MapIndexInsideRectWrappingOnY
+[       OK ] Rectangle.MapIndexInsideRectWrappingOnY (0 ms)
+[ RUN      ] Rectangle.MapIndexInsideRectLargeAsWorld
+[       OK ] Rectangle.MapIndexInsideRectLargeAsWorld (0 ms)
+[----------] 5 tests from Rectangle (0 ms total)
+
+[----------] 3 tests from Randomness
+[ RUN      ] Randomness.DoubleOps
+[       OK ] Randomness.DoubleOps (0 ms)
+[ RUN      ] Randomness.SequenceDoubles
+[       OK ] Randomness.SequenceDoubles (0 ms)
+[ RUN      ] Randomness.Maximum
+[       OK ] Randomness.Maximum (0 ms)
+[----------] 3 tests from Randomness (0 ms total)
+
+[----------] 1 test from Portability
+[ RUN      ] Portability.FloatOps
+[       OK ] Portability.FloatOps (0 ms)
+[----------] 1 test from Portability (0 ms total)
+
+[----------] 14 tests from Bounds
+[ RUN      ] Bounds.Index
+[       OK ] Bounds.Index (0 ms)
+[ RUN      ] Bounds.Area
+[       OK ] Bounds.Area (0 ms)
+[ RUN      ] Bounds.Width
+[       OK ] Bounds.Width (0 ms)
+[ RUN      ] Bounds.Height
+[       OK ] Bounds.Height (0 ms)
+[ RUN      ] Bounds.LeftAsUint
+[       OK ] Bounds.LeftAsUint (0 ms)
+[ RUN      ] Bounds.TopAsUint
+[       OK ] Bounds.TopAsUint (0 ms)
+[ RUN      ] Bounds.RightAsUintNonInclusive
+[       OK ] Bounds.RightAsUintNonInclusive (0 ms)
+[ RUN      ] Bounds.BottomAsUintNonInclusive
+[       OK ] Bounds.BottomAsUintNonInclusive (0 ms)
+[ RUN      ] Bounds.ContainsWorldPoint
+[       OK ] Bounds.ContainsWorldPoint (0 ms)
+[ RUN      ] Bounds.IsInLimits
+[       OK ] Bounds.IsInLimits (0 ms)
+[ RUN      ] Bounds.Shift
+[       OK ] Bounds.Shift (0 ms)
+[ RUN      ] Bounds.Grow
+[       OK ] Bounds.Grow (0 ms)
+[ RUN      ] Bounds.GetMapIndex
+[       OK ] Bounds.GetMapIndex (0 ms)
+[ RUN      ] Bounds.GetValidMapIndex
+[       OK ] Bounds.GetValidMapIndex (0 ms)
+[----------] 14 tests from Bounds (0 ms total)
+
+[----------] 2 tests from MassBuilder
+[ RUN      ] MassBuilder.ConstructorFromHeightmap
+[       OK ] MassBuilder.ConstructorFromHeightmap (0 ms)
+[ RUN      ] MassBuilder.AddPoint
+[       OK ] MassBuilder.AddPoint (0 ms)
+[----------] 2 tests from MassBuilder (0 ms total)
+
+[----------] 3 tests from Mass
+[ RUN      ] Mass.Constructor
+[       OK ] Mass.Constructor (0 ms)
+[ RUN      ] Mass.Null
+[       OK ] Mass.Null (0 ms)
+[ RUN      ] Mass.IncMass
+[       OK ] Mass.IncMass (0 ms)
+[----------] 3 tests from Mass (0 ms total)
+
+[----------] 10 tests from Movement
+[ RUN      ] Movement.Constructor
+[       OK ] Movement.Constructor (0 ms)
+[ RUN      ] Movement.ApplyFriction
+[       OK ] Movement.ApplyFriction (0 ms)
+[ RUN      ] Movement.ApplyFrictionWithNullMass
+[       OK ] Movement.ApplyFrictionWithNullMass (0 ms)
+[ RUN      ] Movement.Move
+[       OK ] Movement.Move (0 ms)
+[ RUN      ] Movement.VelocityOnXNoParams
+[       OK ] Movement.VelocityOnXNoParams (0 ms)
+[ RUN      ] Movement.VelocityOnYNoParams
+[       OK ] Movement.VelocityOnYNoParams (0 ms)
+[ RUN      ] Movement.VelocityOnXOneParam
+[       OK ] Movement.VelocityOnXOneParam (0 ms)
+[ RUN      ] Movement.VelocityOnYOneParam
+[       OK ] Movement.VelocityOnYOneParam (0 ms)
+[ RUN      ] Movement.Dot
+[       OK ] Movement.Dot (0 ms)
+[ RUN      ] Movement.Collide
+[       OK ] Movement.Collide (0 ms)
+[----------] 10 tests from Movement (0 ms total)
+
+[----------] 1 test from Regression
+[ RUN      ] Regression.SimulationSeed12345_OutputConsistency
+Saving image artifacts...
+  [IMG] Entering save_heightmap_png for regression_seed12345_initial.png
+  [IMG] Validated inputs: width=600, height=400
+  [IMG] Allocating normalized array of size 240000
+  [IMG] Copying heightmap data...
+  [IMG] Normalizing data...
+  [IMG] Writing image: w=600, h=400, use_colors=1
+  [IMG] Calling writeImageColors...
+  [IMG] Successfully wrote regression_seed12345_initial.png
+  [IMG] Cleaning up normalized array...
+  [IMG] Exiting save_heightmap_png
+  Initial image saved successfully
+  [IMG] Entering save_heightmap_png for regression_seed12345_final.png
+  [IMG] Validated inputs: width=600, height=400
+  [IMG] Allocating normalized array of size 240000
+  [IMG] Copying heightmap data...
+  [IMG] Normalizing data...
+  [IMG] Writing image: w=600, h=400, use_colors=1
+  [IMG] Calling writeImageColors...
+  [IMG] Successfully wrote regression_seed12345_final.png
+  [IMG] Cleaning up normalized array...
+  [IMG] Exiting save_heightmap_png
+  Final image saved successfully
+
+=== Initial heightmap statistics (baseline: ARM64) ===
+  min:     0.1 (diff: +0.0000000000)
+  max:     2 (diff: +0.0000000000)
+  mean:    0.689232 (diff: -0.0000004172)
+  median:  0.1 (diff: +0.0000000000)
+  std_dev: 0.779593 (diff: +0.0000000596)
+  q25:     0.1 (diff: +0.0000000000)
+  q75:     1.63843 (diff: +0.0000042915)
+  Status:  ✓ PASS
+
+=== Final heightmap statistics (baseline: ARM64) ===
+  min:     0.040344 (diff: +0.0012672432)
+  max:     12.0941 (diff: -0.7657060623)
+  mean:    0.628501 (diff: +0.0044001937)
+  median:  0.115102 (diff: +0.0010110959)
+  std_dev: 0.938109 (diff: +0.0076959133)
+  q25:     0.0985012 (diff: +0.0002457350)
+  q75:     0.948238 (diff: -0.0098950267)
+  Status:  ✓ PASS
+
+[       OK ] Regression.SimulationSeed12345_OutputConsistency (8854 ms)
+[----------] 1 test from Regression (8854 ms total)
+
+[----------] Global test environment tear-down
+[==========] 57 tests from 14 test suites ran. (9091 ms total)
+[  PASSED  ] 57 tests.
+<end of output>
+Test time =   9.13 sec
+----------------------------------------------------------
+Test Passed.
+"PlateTectonicsTests" end time: Mar 31 16:59 Hora de verano romance
+"PlateTectonicsTests" time elapsed: 00:00:09
+----------------------------------------------------------
+
+End testing: Mar 31 16:59 Hora de verano romance
