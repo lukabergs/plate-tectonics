@@ -108,6 +108,7 @@ class lithosphere {
     const uint32_t* getAgeMap() const noexcept; ///< Return surface age map.
     float* getTopography() const noexcept;      ///< Return height map.
     uint32_t* getPlatesMap() const noexcept;    ///< Return a map of the plates owning eaach point
+    void importNormalizedHeightMap(const float* normalized_map, float sea_level);
     void update();                              ///< Simulate one step of plate tectonics.
     uint32_t getWidth() const;
     uint32_t getHeight() const;

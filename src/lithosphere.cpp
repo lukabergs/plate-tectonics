@@ -314,6 +314,54 @@ float* lithosphere::getTopography() const throw() {
     return hmap.raw_data();
 }
 
+void lithosphere::importNormalizedHeightMap(const float* normalized_map, float sea_level) {
+    if (normalized_map == nullptr) {
+        throw invalid_argument("Normalized height map cannot be null");
+    }
+
+    const uint32_t map_area = _worldDimension.getArea();
+    float sea_threshold = 0.5f;
+    float th_step = 0.5f;
+
+    while (th_step > 0.01f) {
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < map_area; ++i) {
+            count += (normalized_map[i] < sea_threshold);
+        }
+
+        th_step *= 0.5f;
+        if (count / (float)map_area < sea_level) {
+            sea_threshold += th_step;
+        } else {
+            sea_threshold -= th_step;
+        }
+    }
+
+    for (uint32_t i = 0; i < map_area; ++i) {
+        hmap[i] = (normalized_map[i] > sea_threshold) * (normalized_map[i] + CONTINENTAL_BASE) +
+                  (normalized_map[i] <= sea_threshold) * OCEANIC_BASE;
+    }
+
+    amap.set_all(0);
+    imap.set_all(0xFFFFFFFF);
+    prev_imap.set_all(0xFFFFFFFF);
+
+    for (uint32_t i = 0; i < max_plates; ++i) {
+        collisions[i].clear();
+        subductions[i].clear();
+    }
+
+    clearPlates();
+
+    cycle_count = 0;
+    iter_count = 0;
+    peak_Ek = 0;
+    last_coll_count = 0;
+    _steps = 0;
+
+    createPlates();
+}
+
 bool lithosphere::isFinished() const {
     return getPlateCount() == 0;
 }

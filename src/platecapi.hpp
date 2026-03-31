@@ -33,6 +33,7 @@ float* platec_api_get_heightmap(void*);
 uint32_t* platec_api_get_platesmap(void*);
 uint32_t platec_api_is_finished(void*);
 void platec_api_step(void*);
+void platec_api_load_heightmap(void*, const float* normalized_heightmap, float sea_level);
 
 float platec_api_velocity_unity_vector_x(void*, uint32_t plate_index);
 float platec_api_velocity_unity_vector_y(void*, uint32_t plate_index);

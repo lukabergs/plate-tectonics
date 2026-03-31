@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 #include <png.h>
 
 // This function actually writes out the PNG image file. The string 'title' is
@@ -11,5 +12,7 @@
 int writeImageGray(const char* filename, int width, int height, float *heightmap, const char* title);
 
 int writeImageColors(const char* filename, int width, int height, float *heightmap, const char* title);
+
+int readImageNormalized(const char* filename, std::vector<float>& heightmap, int& width, int& height);
 
 #endif
