@@ -1,3 +1,12 @@
+V 1.5.0
+-------
+* Added a bathymetry-aware metric topography pipeline
+  - procedural generation now seeds varied ocean-floor relief instead of flat oceans
+  - added shared `uint16_t` metric topography codec and metric import API
+  - example CLI now supports `--sea-level-m`, PNG16 input/output, `.r16` input/output, and sidecar metadata
+  - preview rendering is now separate from authoritative metric data export
+* Added regression and round-trip coverage for the codec, PNG16, `.r16`, and bathymetry-aware generation
+
 V 1.4.4
 -------
 * Fixed Issue #30: Mass values go below zero due to floating point precision errors

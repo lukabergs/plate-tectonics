@@ -90,8 +90,35 @@ cd build
 cmake .. -DWITH_EXAMPLES=ON -DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
 make
 cd examples
-./simulation
+./simulation --dim 600 400 --filename world
 ```
+
+Metric heightmaps
+=================
+
+The example CLI now separates authoritative terrain data from preview rendering.
+
+- Metric terrain domain: `0..65535`
+- `0`: deepest seafloor sample
+- `65535`: highest terrain sample
+- `--sea-level-m`: coastline/crust-classification threshold in that metric domain
+- Default data exports: `<base>.r16`, `<base>.r16.json`, `<base>.png` (16-bit grayscale PNG)
+- Preview export: `<base>_preview.png`
+
+Example workflows:
+
+```bash
+# Procedural world with explicit metric sea level
+./simulation --dim 600 400 --sea-level-m 32000 --filename world
+
+# Import a metric PNG16 heightmap
+./simulation --input-png16 world.png
+
+# Import a raw metric .r16 heightmap
+./simulation --input-r16 world.r16
+```
+
+`.r16` files are little-endian `uint16_t`, row-major, one sample per pixel. Sidecar metadata lives in `<base>.r16.json` and stores width, height, `sea_level_m`, format, endianness, layout, and version.
 
 How to run tests (C++)
 ======================
@@ -136,7 +163,14 @@ The library is quite simple. `platec.create()` requires all 10 parameters and su
     
     hm = platec.get_heightmap(p)
     platec.destroy(p)
-```    
+```
+
+The Python bindings also expose metric helpers on an existing simulation:
+
+```python
+platec.load_heightmap_u16(p, metric_samples, 32000)
+sea_level_m = platec.get_sea_level_m(p)
+```
 
 
 With keyword arguments for clarity:

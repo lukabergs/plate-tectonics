@@ -4,6 +4,7 @@
 #endif
 #include <cmath>
 #include <Python.h>
+#include <vector>
 
 #define __STDC_CONSTANT_MACROS
 #if _WIN32 || _WIN64
@@ -74,6 +75,53 @@ static PyObject * platec_destroy(PyObject *self, PyObject *args)
     return Py_BuildValue("i", 0);
 }
 
+static PyObject * platec_load_heightmap_u16(PyObject *self, PyObject *args)
+{
+    void *litho;
+    PyObject* sequence_obj;
+    unsigned int sea_level_m;
+    if (!PyArg_ParseTuple(args, "nOI", &litho, &sequence_obj, &sea_level_m))
+        return nullptr;
+    if (sea_level_m > 65535U) {
+        PyErr_SetString(PyExc_ValueError, "sea_level_m must be <= 65535");
+        return nullptr;
+    }
+
+    PyObject* sequence = PySequence_Fast(sequence_obj, "heightmap must be a sequence");
+    if (sequence == nullptr) {
+        return nullptr;
+    }
+
+    const Py_ssize_t expected =
+        static_cast<Py_ssize_t>(lithosphere_getMapWidth(litho)) *
+        static_cast<Py_ssize_t>(lithosphere_getMapHeight(litho));
+    if (PySequence_Fast_GET_SIZE(sequence) != expected) {
+        Py_DECREF(sequence);
+        PyErr_SetString(PyExc_ValueError, "heightmap length does not match simulation dimensions");
+        return nullptr;
+    }
+
+    std::vector<uint16_t> heightmap(static_cast<size_t>(expected));
+    PyObject** items = PySequence_Fast_ITEMS(sequence);
+    for (Py_ssize_t i = 0; i < expected; ++i) {
+        const unsigned long value = PyLong_AsUnsignedLong(items[i]);
+        if (PyErr_Occurred() != nullptr) {
+            Py_DECREF(sequence);
+            return nullptr;
+        }
+        if (value > 65535UL) {
+            Py_DECREF(sequence);
+            PyErr_SetString(PyExc_ValueError, "heightmap samples must be in [0, 65535]");
+            return nullptr;
+        }
+        heightmap[static_cast<size_t>(i)] = static_cast<uint16_t>(value);
+    }
+    Py_DECREF(sequence);
+
+    platec_api_load_heightmap_u16(litho, heightmap.data(), static_cast<uint16_t>(sea_level_m));
+    return Py_BuildValue("i", 0);
+}
+
 PyObject *makelist(float array[], size_t size) {
     PyObject *l = PyList_New(size);
     for (size_t i = 0; i != size; ++i) {
@@ -129,6 +177,14 @@ static PyObject * platec_is_finished(PyObject *self, PyObject *args)
     return res;
 }
 
+static PyObject * platec_get_sea_level_m(PyObject *self, PyObject *args)
+{
+    void *litho;
+    if (!PyArg_ParseTuple(args, "n", &litho))
+        return nullptr;
+    return Py_BuildValue("I", static_cast<unsigned int>(platec_api_get_sea_level_m(litho)));
+}
+
 static PyMethodDef PlatecMethods[] = {
     {   "create",  (PyCFunction)platec_create, METH_VARARGS | METH_KEYWORDS,
         "Create initial plates configuration."
@@ -136,8 +192,14 @@ static PyMethodDef PlatecMethods[] = {
     {   "destroy",  platec_destroy, METH_VARARGS,
         "Release the data for the simulation."
     },
+    {   "load_heightmap_u16",  platec_load_heightmap_u16, METH_VARARGS,
+        "Load a uint16 metric heightmap into an existing simulation."
+    },
     {   "get_heightmap",  platec_get_heightmap, METH_VARARGS,
         "Get current heightmap."
+    },
+    {   "get_sea_level_m",  platec_get_sea_level_m, METH_VARARGS,
+        "Get the active metric sea level threshold."
     },
     {   "get_platesmap",  platec_get_platesmap, METH_VARARGS,
         "Get current plates map."

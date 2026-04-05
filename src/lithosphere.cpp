@@ -23,6 +23,7 @@
 #include "simplexnoise.hpp"
 #include "sqrdmd.hpp"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -61,6 +62,33 @@ static void push_unique_owner(std::vector<uint32_t>& candidates, uint32_t owner,
     candidates.push_back(owner);
 }
 
+static void normalize_noise_field(std::vector<float>& values) {
+    if (values.empty()) {
+        return;
+    }
+
+    float lowest = values[0];
+    float highest = values[0];
+    for (size_t i = 1; i < values.size(); ++i) {
+        lowest = std::min(lowest, values[i]);
+        highest = std::max(highest, values[i]);
+    }
+
+    const float range = highest - lowest;
+    if (range <= FLT_EPSILON) {
+        std::fill(values.begin(), values.end(), 0.5f);
+        return;
+    }
+
+    for (float& value : values) {
+        value = (value - lowest) / range;
+    }
+}
+
+static float signed_noise(float normalized_noise) {
+    return TopographyCodec::clamp_normalized(normalized_noise) * 2.0f - 1.0f;
+}
+
 WorldPoint lithosphere::randomPosition() {
     return WorldPoint(_randsource.next() % _worldDimension.getWidth(),
                       _randsource.next() % _worldDimension.getHeight(), _worldDimension);
@@ -78,7 +106,8 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
                          uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
                          float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
                          float _erosion_strength, float _crust_rotation_strength,
-                         float _rotation_strength) noexcept(false)
+                         float _rotation_strength, float _subduction_strength,
+                         int32_t sea_level_m_override) noexcept(false)
     : hmap(width, height), imap(width, height), prev_imap(width, height), amap(width, height),
       plates(nullptr), plate_areas(_max_plates), plate_indices_found(_max_plates),
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
@@ -87,58 +116,12 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
       erosion_strength(_erosion_strength < 0.0f ? 0.0f : _erosion_strength),
       crust_rotation_strength(_crust_rotation_strength < 0.0f ? 0.0f : _crust_rotation_strength),
       rotation_strength(_rotation_strength < 0.0f ? 0.0f : _rotation_strength),
+      subduction_strength(_subduction_strength < 0.0f ? 0.0f : _subduction_strength),
+      sea_level_m(TopographyCodec::legacy_raw_sea_level_m()),
       _worldDimension(width, height), _randsource(seed), _steps(0) {
     if (width < 5 || height < 5) {
         throw runtime_error("Width and height should be >=5");
     }
-
-    WorldDimension tmpDim = WorldDimension(width + 1, height + 1);
-    const uint32_t A = tmpDim.getArea();
-    float* tmp = new float[A];
-
-    createSlowNoise(tmp, tmpDim);
-
-    float lowest = tmp[0], highest = tmp[0];
-    for (uint32_t i = 1; i < A; ++i) {
-        lowest = lowest < tmp[i] ? lowest : tmp[i];
-        highest = highest > tmp[i] ? highest : tmp[i];
-    }
-
-    for (uint32_t i = 0; i < A; ++i) // Scale to [0 ... 1]
-        tmp[i] = (tmp[i] - lowest) / (highest - lowest);
-
-    float sea_threshold = 0.5;
-    float th_step = 0.5;
-
-    // Find the actual value in height map that produces the continent-sea
-    // ratio defined be "sea_level".
-    while (th_step > 0.01) {
-        uint32_t count = 0;
-        for (uint32_t i = 0; i < A; ++i)
-            count += (tmp[i] < sea_threshold);
-
-        th_step *= 0.5;
-        if (count / (float)A < sea_level)
-            sea_threshold += th_step;
-        else
-            sea_threshold -= th_step;
-    }
-
-    sea_level = sea_threshold;
-    for (uint32_t i = 0; i < A; ++i) // Genesis 1:9-10.
-    {
-        tmp[i] = (tmp[i] > sea_level) * (tmp[i] + CONTINENTAL_BASE) +
-                 (tmp[i] <= sea_level) * OCEANIC_BASE;
-    }
-
-    // Scalp the +1 away from map side to get a power of two side length!
-    // Practically only the redundant map edges become removed.
-    for (uint32_t y = 0; y < _worldDimension.getHeight(); ++y) {
-        memcpy(&hmap[_worldDimension.lineIndex(y)], &tmp[tmpDim.lineIndex(y)],
-               _worldDimension.getWidth() * sizeof(float));
-    }
-
-    delete[] tmp;
 
     collisions.resize(max_plates);
     subductions.resize(max_plates);
@@ -148,6 +131,7 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
     for (uint32_t i = 0; i < max_plates; i++) {
         plate_areas[i].border.reserve(8);
     }
+    seedInitialTopography(sea_level, sea_level_m_override);
     createPlates();
 }
 
@@ -331,34 +315,11 @@ float* lithosphere::getTopography() const throw() {
     return hmap.raw_data();
 }
 
-void lithosphere::importNormalizedHeightMap(const float* normalized_map, float sea_level) {
-    if (normalized_map == nullptr) {
-        throw invalid_argument("Normalized height map cannot be null");
-    }
+bool lithosphere::isOceanic(float value) const noexcept {
+    return TopographyCodec::is_oceanic_internal(value);
+}
 
-    const uint32_t map_area = _worldDimension.getArea();
-    float sea_threshold = 0.5f;
-    float th_step = 0.5f;
-
-    while (th_step > 0.01f) {
-        uint32_t count = 0;
-        for (uint32_t i = 0; i < map_area; ++i) {
-            count += (normalized_map[i] < sea_threshold);
-        }
-
-        th_step *= 0.5f;
-        if (count / (float)map_area < sea_level) {
-            sea_threshold += th_step;
-        } else {
-            sea_threshold -= th_step;
-        }
-    }
-
-    for (uint32_t i = 0; i < map_area; ++i) {
-        hmap[i] = (normalized_map[i] > sea_threshold) * (normalized_map[i] + CONTINENTAL_BASE) +
-                  (normalized_map[i] <= sea_threshold) * OCEANIC_BASE;
-    }
-
+void lithosphere::resetSimulationState() {
     amap.set_all(0);
     imap.set_all(0xFFFFFFFF);
     prev_imap.set_all(0xFFFFFFFF);
@@ -375,7 +336,116 @@ void lithosphere::importNormalizedHeightMap(const float* normalized_map, float s
     peak_Ek = 0;
     last_coll_count = 0;
     _steps = 0;
+}
 
+void lithosphere::initializeHeightMapFromMetric(const uint16_t* heightmap_m, uint16_t new_sea_level_m) {
+    if (heightmap_m == nullptr) {
+        throw invalid_argument("Metric height map cannot be null");
+    }
+
+    sea_level_m = new_sea_level_m;
+    const uint32_t map_area = _worldDimension.getArea();
+    for (uint32_t i = 0; i < map_area; ++i) {
+        hmap[i] = TopographyCodec::meters_to_internal(heightmap_m[i], sea_level_m);
+    }
+}
+
+void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override) {
+    const uint32_t map_area = _worldDimension.getArea();
+    std::vector<float> continent_macro(map_area);
+    std::vector<float> continent_detail(map_area);
+    std::vector<float> shelf_noise(map_area);
+    std::vector<float> abyss_noise(map_area);
+    std::vector<float> ridge_noise(map_area);
+
+    createSlowNoise(continent_macro.data(), _worldDimension);
+    createSlowNoise(continent_detail.data(), _worldDimension);
+    createSlowNoise(shelf_noise.data(), _worldDimension);
+    createSlowNoise(abyss_noise.data(), _worldDimension);
+    createSlowNoise(ridge_noise.data(), _worldDimension);
+
+    normalize_noise_field(continent_macro);
+    normalize_noise_field(continent_detail);
+    normalize_noise_field(shelf_noise);
+    normalize_noise_field(abyss_noise);
+    normalize_noise_field(ridge_noise);
+
+    std::vector<uint16_t> metric_heightmap(map_area);
+    for (uint32_t i = 0; i < map_area; ++i) {
+        const float macro = signed_noise(continent_macro[i]);
+        const float detail = signed_noise(continent_detail[i]);
+        const float shelf = signed_noise(shelf_noise[i]);
+        const float abyss = signed_noise(abyss_noise[i]);
+        const float ridge = signed_noise(ridge_noise[i]);
+
+        const float continentality = 0.68f * macro + 0.22f * detail + 0.10f * shelf;
+
+        float normalized_height = 0.0f;
+        if (continentality >= 0.0f) {
+            const float land_relief = TopographyCodec::clamp_normalized(
+                0.56f + 0.22f * macro + 0.12f * detail + 0.07f * ridge + 0.03f * shelf);
+            normalized_height = 0.56f + land_relief * 0.44f;
+        } else {
+            const float ocean_relief = TopographyCodec::clamp_normalized(
+                0.44f + 0.26f * (-continentality) + 0.16f * abyss + 0.09f * shelf - 0.11f * ridge);
+            normalized_height = ocean_relief * 0.42f;
+        }
+
+        metric_heightmap[i] = static_cast<uint16_t>(std::lround(
+            TopographyCodec::clamp_normalized(normalized_height) *
+            static_cast<float>(TopographyCodec::kMaxHeightMeters)));
+    }
+
+    const bool has_override = sea_level_m_override >= 0 &&
+                              sea_level_m_override <= TopographyCodec::kMaxHeightMeters;
+    const uint16_t initial_sea_level_m =
+        has_override
+            ? static_cast<uint16_t>(sea_level_m_override)
+            : TopographyCodec::infer_metric_sea_level(metric_heightmap.data(), metric_heightmap.size(),
+                                                      ocean_coverage);
+    initializeHeightMapFromMetric(metric_heightmap.data(), initial_sea_level_m);
+}
+
+void lithosphere::importNormalizedHeightMap(const float* normalized_map, float sea_level) {
+    if (normalized_map == nullptr) {
+        throw invalid_argument("Normalized height map cannot be null");
+    }
+
+    const uint32_t map_area = _worldDimension.getArea();
+    const float sea_threshold =
+        TopographyCodec::infer_normalized_sea_threshold(normalized_map, map_area, sea_level);
+    sea_level_m = static_cast<uint16_t>(std::lround(
+        sea_threshold * static_cast<float>(TopographyCodec::kMaxHeightMeters)));
+
+    for (uint32_t i = 0; i < map_area; ++i) {
+        hmap[i] = TopographyCodec::normalized_to_internal(normalized_map[i], sea_threshold);
+    }
+
+    resetSimulationState();
+    createPlates();
+}
+
+void lithosphere::importRawHeightMap(const float* normalized_map) {
+    if (normalized_map == nullptr) {
+        throw invalid_argument("Normalized height map cannot be null");
+    }
+
+    const uint32_t map_area = _worldDimension.getArea();
+    std::vector<uint16_t> metric_heightmap(map_area);
+    for (uint32_t i = 0; i < map_area; ++i) {
+        metric_heightmap[i] = static_cast<uint16_t>(std::lround(
+            TopographyCodec::clamp_normalized(normalized_map[i]) *
+            static_cast<float>(TopographyCodec::kMaxHeightMeters)));
+    }
+
+    initializeHeightMapFromMetric(metric_heightmap.data(), TopographyCodec::legacy_raw_sea_level_m());
+    resetSimulationState();
+    createPlates();
+}
+
+void lithosphere::importMetricHeightMap(const uint16_t* heightmap_m, uint16_t new_sea_level_m) {
+    initializeHeightMapFromMetric(heightmap_m, new_sea_level_m);
+    resetSimulationState();
     createPlates();
 }
 
@@ -478,8 +548,8 @@ void lithosphere::updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                 // DO NOT ACCEPT HEIGHT EQUALITY! Equality leads to subduction
                 // of shore that 's barely above sea level. It's a lot less
                 // serious problem to treat very shallow waters as continent...
-                const bool prev_is_oceanic = hmap[k] < CONTINENTAL_BASE;
-                const bool this_is_oceanic = this_map[j] < CONTINENTAL_BASE;
+                const bool prev_is_oceanic = isOceanic(hmap[k]);
+                const bool this_is_oceanic = isOceanic(this_map[j]);
 
                 const uint32_t prev_timestamp = plates[imap[k]]->getCrustTimestamp(x_mod, y_mod);
                 const uint32_t this_timestamp = this_age[j];
@@ -494,7 +564,8 @@ void lithosphere::updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                     // The level of effect that subduction has
                     // is directly related to the amount of water
                     // on top of the subducting plate.
-                    const float sediment = SUBDUCT_RATIO * OCEANIC_BASE *
+                    const float subducted_crust = OCEANIC_BASE * subduction_strength;
+                    const float sediment = SUBDUCT_RATIO * subducted_crust *
                                            (CONTINENTAL_BASE - this_map[j]) / CONTINENTAL_BASE;
 
                     // Save collision to the receiving plate's list.
@@ -507,20 +578,23 @@ void lithosphere::updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                     // a) having correct amount of colliding crust (below)
                     // b) protecting subducted locations from receiving
                     //    crust from other subductions/collisions.
-                    plates[i]->setCrust(x_mod, y_mod, this_map[j] - OCEANIC_BASE, this_timestamp);
+                    plates[i]->setCrust(x_mod, y_mod, this_map[j] - subducted_crust,
+                                        this_timestamp);
 
                     if (this_map[j] <= 0)
                         continue; // Nothing more to collide.
                 } else if (prev_is_oceanic) {
-                    const float sediment = SUBDUCT_RATIO * OCEANIC_BASE *
+                    const float subducted_crust = OCEANIC_BASE * subduction_strength;
+                    const float sediment = SUBDUCT_RATIO * subducted_crust *
                                            (CONTINENTAL_BASE - hmap[k]) / CONTINENTAL_BASE;
 
                     plateCollision coll(imap[k], x_mod, y_mod, sediment);
                     subductions[i].push_back(coll);
                     ++oceanic_collisions;
 
-                    plates[imap[k]]->setCrust(x_mod, y_mod, hmap[k] - OCEANIC_BASE, prev_timestamp);
-                    hmap[k] -= OCEANIC_BASE;
+                    plates[imap[k]]->setCrust(x_mod, y_mod, hmap[k] - subducted_crust,
+                                              prev_timestamp);
+                    hmap[k] -= subducted_crust;
 
                     if (hmap[k] <= 0) {
                         imap[k] = i;
@@ -902,7 +976,7 @@ void lithosphere::update() {
             crust_age = MAX_BUOYANCY_AGE - crust_age;
             crust_age &= -(crust_age <= MAX_BUOYANCY_AGE);
 
-            hmap[i] += (hmap[i] < CONTINENTAL_BASE) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
+            hmap[i] += isOceanic(hmap[i]) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
                        MULINV_MAX_BUOYANCY_AGE;
         }
 
@@ -994,7 +1068,7 @@ void lithosphere::restart() {
             crust_age = MAX_BUOYANCY_AGE - crust_age;
             crust_age &= -(crust_age <= MAX_BUOYANCY_AGE);
 
-            hmap[i] += (hmap[i] < CONTINENTAL_BASE) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
+            hmap[i] += isOceanic(hmap[i]) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
                        MULINV_MAX_BUOYANCY_AGE;
         }
     } catch (const exception& e) {

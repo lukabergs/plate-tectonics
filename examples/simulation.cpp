@@ -37,28 +37,58 @@ constexpr uint32_t kDefaultCycleCount = 2;
 constexpr uint32_t kDefaultPlateCount = 10;
 constexpr float kDefaultRotationStrength = 1.0f;
 constexpr float kDefaultLandmassRotation = 0.0f;
+constexpr float kDefaultSubductionStrength = 1.0f;
+constexpr float kDefaultMinInitialHeight = 0.0f;
+constexpr float kDefaultMaxInitialHeight = 1.0f;
 constexpr uint16_t kGifDelayCs = 8;
 
 const fs::path kRepoRoot(PLATE_TECTONICS_ROOT);
 const fs::path kDefaultInputDir = kRepoRoot / "img" / "in";
 const fs::path kDefaultOutputDir = kRepoRoot / "img" / "out";
 
+enum class ToneMapMode {
+    Linear,
+    Log,
+    Asinh
+};
+
+enum class InputMode {
+    Procedural,
+    LegacyNormalizedPng,
+    MetricPng16,
+    MetricR16
+};
+
 struct Params {
     uint32_t seed;
     uint32_t width;
     uint32_t height;
     bool colors;
+    bool normalize_output;
+    bool export_heightmap_f32;
     bool make_gif;
     bool delete_gif_frames;
     bool show_boundaries;
     uint32_t cycles;
     uint32_t plates;
+    uint32_t aggregation_overlap_abs;
+    float aggregation_overlap_rel;
     uint32_t erosion_period;
+    float folding_ratio;
     float erosion_strength;
     float rotation_strength;
     float landmass_rotation;
+    float subduction_strength;
+    float min_initial_height;
+    float max_initial_height;
+    float display_min;
+    float display_max;
+    ToneMapMode tone_map;
     uint32_t step;
     bool custom_dimensions;
+    bool has_sea_level_m;
+    uint16_t sea_level_m;
+    InputMode input_mode;
     std::string filename;
     std::string input_path;
 };
@@ -88,6 +118,14 @@ struct BoundaryVelocity {
     float y;
 };
 
+struct NormalizationRange {
+    bool enabled = false;
+    float min = 0.0f;
+    float max = 1.0f;
+    float output_min = 0.0f;
+    float output_max = 1.0f;
+};
+
 [[noreturn]] void fail(const std::string& message)
 {
     fprintf(stderr, "error: %s\n", message.c_str());
@@ -111,6 +149,26 @@ uint32_t parse_u32(const char* flag, const char* value)
     return static_cast<uint32_t>(parsed);
 }
 
+uint32_t parse_nonnegative_u32(const char* flag, const char* value)
+{
+    char* end = nullptr;
+    const unsigned long parsed = strtoul(value, &end, 10);
+    if (end == value || *end != '\0' ||
+        parsed > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
+        fail(std::string("invalid value for ") + flag + ": " + value);
+    }
+    return static_cast<uint32_t>(parsed);
+}
+
+uint16_t parse_u16(const char* flag, const char* value)
+{
+    const uint32_t parsed = parse_nonnegative_u32(flag, value);
+    if (parsed > TopographyCodec::kMaxHeightMeters) {
+        fail(std::string("invalid value for ") + flag + ": " + value);
+    }
+    return static_cast<uint16_t>(parsed);
+}
+
 float parse_nonnegative_float(const char* flag, const char* value)
 {
     char* end = nullptr;
@@ -119,6 +177,54 @@ float parse_nonnegative_float(const char* flag, const char* value)
         fail(std::string("invalid value for ") + flag + ": " + value);
     }
     return parsed;
+}
+
+float parse_float(const char* flag, const char* value)
+{
+    char* end = nullptr;
+    const float parsed = strtof(value, &end);
+    if (end == value || *end != '\0' || !std::isfinite(parsed)) {
+        fail(std::string("invalid value for ") + flag + ": " + value);
+    }
+    return parsed;
+}
+
+float parse_unit_float(const char* flag, const char* value)
+{
+    const float parsed = parse_nonnegative_float(flag, value);
+    if (parsed > 1.0f) {
+        fail(std::string("invalid value for ") + flag + ": " + value);
+    }
+    return parsed;
+}
+
+ToneMapMode parse_tone_map(const char* value)
+{
+    if (strcmp(value, "linear") == 0) {
+        return ToneMapMode::Linear;
+    }
+    if (strcmp(value, "log") == 0) {
+        return ToneMapMode::Log;
+    }
+    if (strcmp(value, "asinh") == 0) {
+        return ToneMapMode::Asinh;
+    }
+
+    fail(std::string("invalid value for --tone-map: ") + value);
+}
+
+const char* tone_map_name(ToneMapMode mode)
+{
+    switch (mode) {
+    case ToneMapMode::Linear:
+        return "linear";
+    case ToneMapMode::Log:
+        return "log";
+    case ToneMapMode::Asinh:
+        return "asinh";
+    default:
+        return "linear";
+    }
 }
 
 std::string escape_powershell_single_quotes(const std::string& value)
@@ -138,22 +244,37 @@ void print_help()
 {
     printf(" -h --help           : show this message\n");
     printf(" -s SEED             : use the given SEED\n");
-    printf(" -i --input FILE     : load FILE from the given path or from %s\n",
+    printf(" -i --input FILE     : load legacy normalized PNG FILE from the given path or from %s\n",
            display_path(kDefaultInputDir).c_str());
+    printf(" --input-png16 FILE  : load 16-bit grayscale metric PNG\n");
+    printf(" --input-r16 FILE    : load little-endian metric .r16 raw data\n");
     printf(" --dim WIDTH HEIGHT  : use the given width and height when no input image is used\n");
+    printf(" --sea-level-m N     : metric coastline threshold in [0, 65535]\n");
     printf(" --colors            : generate a colors map\n");
     printf(" --grayscale         : generate a grayscale map\n");
+    printf(" --no-output-normalization: render raw internal heights instead of first-frame normalization\n");
+    printf(" --min-initial-height X: map the initial minimum to X during first-frame normalization\n");
+    printf(" --max-initial-height X: map the initial maximum to X during first-frame normalization\n");
+    printf(" --display-min X     : lower bound of the preview display window\n");
+    printf(" --display-max X     : upper bound of the preview display window\n");
+    printf(" --tone-map MODE     : preview tone map: linear, log, asinh\n");
+    printf(" --export-heightmap-f32: write the final raw float32 debug heightmap plus metadata\n");
     printf(" --filename NAME     : output basename when no input image is used\n");
     printf(" --cycles N          : number of simulation cycles to run\n");
     printf(" --plates N          : number of tectonic plates to initialize\n");
+    printf(" --aggregation-overlap-abs N: overlap pixels needed to aggregate continents\n");
+    printf(" --aggregation-overlap-rel X: overlap ratio needed to aggregate continents\n");
+    printf(" --folding-ratio X   : fraction of overlapping continental crust turned into uplift\n");
     printf(" --erosion-period N  : number of updates between erosion passes\n");
     printf(" --erosion-strength X: scale erosion amount (0 disables)\n");
     printf(" --rotation-strength X: scale angular plate motion\n");
     printf(" --landmass-rotation X: scale visible crust rotation (0 disables)\n");
+    printf(" --subduction-strength X: scale oceanic crust removal during subduction\n");
     printf(" --step X            : save intermediate maps every X steps\n");
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
     printf(" --show-boundaries   : overlay convergent/divergent/transform boundaries\n");
+    printf(" output files        : <base>.r16, <base>.r16.json, <base>.png (PNG16 data), <base>_preview.png\n");
 }
 
 Params fill_params(int argc, char* argv[])
@@ -165,17 +286,31 @@ Params fill_params(int argc, char* argv[])
         600,
         400,
         true,
+        true,
+        false,
         false,
         false,
         false,
         kDefaultCycleCount,
         kDefaultPlateCount,
+        kAggrOverlapAbs,
+        kAggrOverlapRel,
         kErosionPeriod,
+        kFoldingRatio,
         kDefaultErosionStrength,
         kDefaultRotationStrength,
         kDefaultLandmassRotation,
+        kDefaultSubductionStrength,
+        kDefaultMinInitialHeight,
+        kDefaultMaxInitialHeight,
+        0.0f,
+        1.0f,
+        ToneMapMode::Linear,
         0,
         false,
+        false,
+        0,
+        InputMode::Procedural,
         "simulation",
         ""
     };
@@ -202,11 +337,54 @@ Params fill_params(int argc, char* argv[])
             }
             params.custom_dimensions = true;
             p += 3;
+        } else if (strcmp(argv[p], "--sea-level-m") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --sea-level-m");
+            }
+            params.has_sea_level_m = true;
+            params.sea_level_m = parse_u16("--sea-level-m", argv[p + 1]);
+            p += 2;
         } else if (strcmp(argv[p], "--colors") == 0) {
             params.colors = true;
             p += 1;
         } else if (strcmp(argv[p], "--grayscale") == 0) {
             params.colors = false;
+            p += 1;
+        } else if (strcmp(argv[p], "--no-output-normalization") == 0) {
+            params.normalize_output = false;
+            p += 1;
+        } else if (strcmp(argv[p], "--min-initial-height") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --min-initial-height");
+            }
+            params.min_initial_height = parse_unit_float("--min-initial-height", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--max-initial-height") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --max-initial-height");
+            }
+            params.max_initial_height = parse_unit_float("--max-initial-height", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--display-min") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --display-min");
+            }
+            params.display_min = parse_float("--display-min", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--display-max") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --display-max");
+            }
+            params.display_max = parse_float("--display-max", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--tone-map") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --tone-map");
+            }
+            params.tone_map = parse_tone_map(argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--export-heightmap-f32") == 0) {
+            params.export_heightmap_f32 = true;
             p += 1;
         } else if (strcmp(argv[p], "--filename") == 0) {
             if (p + 1 >= argc) {
@@ -225,6 +403,26 @@ Params fill_params(int argc, char* argv[])
                 fail("a parameter should follow --plates");
             }
             params.plates = parse_u32("--plates", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--aggregation-overlap-abs") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --aggregation-overlap-abs");
+            }
+            params.aggregation_overlap_abs =
+                parse_nonnegative_u32("--aggregation-overlap-abs", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--aggregation-overlap-rel") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --aggregation-overlap-rel");
+            }
+            params.aggregation_overlap_rel =
+                parse_unit_float("--aggregation-overlap-rel", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--folding-ratio") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --folding-ratio");
+            }
+            params.folding_ratio = parse_nonnegative_float("--folding-ratio", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--erosion-period") == 0) {
             if (p + 1 >= argc) {
@@ -251,6 +449,13 @@ Params fill_params(int argc, char* argv[])
             params.landmass_rotation =
                 parse_nonnegative_float("--landmass-rotation", argv[p + 1]);
             p += 2;
+        } else if (strcmp(argv[p], "--subduction-strength") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --subduction-strength");
+            }
+            params.subduction_strength =
+                parse_nonnegative_float("--subduction-strength", argv[p + 1]);
+            p += 2;
         } else if (strcmp(argv[p], "--step") == 0) {
             if (p + 1 >= argc) {
                 fail("a parameter should follow --step");
@@ -261,6 +466,30 @@ Params fill_params(int argc, char* argv[])
             if (p + 1 >= argc) {
                 fail("a parameter should follow --input");
             }
+            if (params.input_mode != InputMode::Procedural) {
+                fail("only one input mode can be used");
+            }
+            params.input_mode = InputMode::LegacyNormalizedPng;
+            params.input_path = argv[p + 1];
+            p += 2;
+        } else if (strcmp(argv[p], "--input-png16") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --input-png16");
+            }
+            if (params.input_mode != InputMode::Procedural) {
+                fail("only one input mode can be used");
+            }
+            params.input_mode = InputMode::MetricPng16;
+            params.input_path = argv[p + 1];
+            p += 2;
+        } else if (strcmp(argv[p], "--input-r16") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --input-r16");
+            }
+            if (params.input_mode != InputMode::Procedural) {
+                fail("only one input mode can be used");
+            }
+            params.input_mode = InputMode::MetricR16;
             params.input_path = argv[p + 1];
             p += 2;
         } else if (strcmp(argv[p], "--gif") == 0) {
@@ -277,17 +506,35 @@ Params fill_params(int argc, char* argv[])
         }
     }
 
-    if (!params.input_path.empty() && params.custom_dimensions) {
+    if (params.input_mode == InputMode::LegacyNormalizedPng && params.custom_dimensions) {
         fail("--dim cannot be used together with --input");
+    }
+    if (params.input_mode == InputMode::MetricPng16 && params.custom_dimensions) {
+        fail("--dim cannot be used together with --input-png16");
+    }
+    if (params.input_path.empty() && params.input_mode != InputMode::Procedural) {
+        fail("missing input path");
+    }
+    if (!params.input_path.empty() && params.input_mode == InputMode::Procedural) {
+        fail("internal input parsing error");
+    }
+    if (params.input_mode == InputMode::LegacyNormalizedPng && params.has_sea_level_m) {
+        fail("--sea-level-m is not supported with legacy --input");
     }
     if (params.delete_gif_frames && !params.make_gif) {
         fail("--no-steps requires --gif");
+    }
+    if (params.min_initial_height > params.max_initial_height) {
+        fail("--min-initial-height cannot be greater than --max-initial-height");
+    }
+    if (!(params.display_min < params.display_max)) {
+        fail("--display-min must be smaller than --display-max");
     }
 
     return params;
 }
 
-fs::path resolve_input_path(const std::string& input_path)
+fs::path resolve_input_path(const std::string& input_path, const char* default_extension = nullptr)
 {
     const fs::path provided(input_path);
     std::vector<fs::path> candidates;
@@ -299,13 +546,13 @@ fs::path resolve_input_path(const std::string& input_path)
         candidates.push_back(kDefaultInputDir / provided);
     }
 
-    if (provided.extension().empty()) {
-        const fs::path with_png = provided.string() + ".png";
-        if (with_png.is_absolute()) {
-            candidates.push_back(with_png);
+    if (provided.extension().empty() && default_extension != nullptr) {
+        const fs::path with_extension = provided.string() + default_extension;
+        if (with_extension.is_absolute()) {
+            candidates.push_back(with_extension);
         } else {
-            candidates.push_back(fs::current_path() / with_png);
-            candidates.push_back(kDefaultInputDir / with_png);
+            candidates.push_back(fs::current_path() / with_extension);
+            candidates.push_back(kDefaultInputDir / with_extension);
         }
     }
 
@@ -368,11 +615,199 @@ std::string frame_file_name(const std::string& stem, uint32_t run_index, uint32_
     return buffer;
 }
 
-void save_image(const float* heightmap, const fs::path& filename, int width, int height, bool colors)
+NormalizationRange capture_normalization_range(const float* heightmap, int size, bool normalize_output,
+                                               float output_min, float output_max)
+{
+    NormalizationRange range;
+    range.enabled = normalize_output;
+    range.output_min = output_min;
+    range.output_max = output_max;
+    if (!normalize_output || size <= 0) {
+        return range;
+    }
+
+    float min_value = heightmap[0];
+    float max_value = heightmap[0];
+    for (int i = 1; i < size; ++i) {
+        min_value = min_value < heightmap[i] ? min_value : heightmap[i];
+        max_value = max_value > heightmap[i] ? max_value : heightmap[i];
+    }
+
+    range.min = min_value;
+    range.max = max_value;
+    return range;
+}
+
+void apply_normalization_range(std::vector<float>& values, const NormalizationRange& range)
+{
+    if (!range.enabled || values.empty()) {
+        return;
+    }
+
+    const float diff = range.max - range.min;
+    if (diff <= 0.0f) {
+        const float fill = 0.5f * (range.output_min + range.output_max);
+        for (float& value : values) {
+            value = fill;
+        }
+        return;
+    }
+
+    const float output_diff = range.output_max - range.output_min;
+    for (float& value : values) {
+        value = range.output_min + ((value - range.min) / diff) * output_diff;
+    }
+}
+
+float apply_tone_curve(float value, ToneMapMode tone_map)
+{
+    constexpr float kLogStrength = 9.0f;
+    constexpr float kAsinhStrength = 8.0f;
+
+    if (value <= 0.0f) {
+        return 0.0f;
+    }
+    if (value >= 1.0f) {
+        return 1.0f;
+    }
+
+    switch (tone_map) {
+    case ToneMapMode::Linear:
+        return value;
+    case ToneMapMode::Log:
+        return static_cast<float>(std::log1p(kLogStrength * value) / std::log1p(kLogStrength));
+    case ToneMapMode::Asinh:
+        return static_cast<float>(std::asinh(kAsinhStrength * value) / std::asinh(kAsinhStrength));
+    default:
+        return value;
+    }
+}
+
+void apply_display_mapping(std::vector<float>& values, float display_min, float display_max,
+                           ToneMapMode tone_map)
+{
+    if (values.empty()) {
+        return;
+    }
+
+    const float display_range = display_max - display_min;
+    for (float& value : values) {
+        float mapped = (value - display_min) / display_range;
+        if (mapped <= 0.0f) {
+            value = 0.0f;
+            continue;
+        }
+        if (mapped >= 1.0f) {
+            value = 1.0f;
+            continue;
+        }
+        value = apply_tone_curve(mapped, tone_map);
+    }
+}
+
+void export_heightmap_f32(const float* heightmap, const fs::path& filename, int width, int height)
+{
+    const size_t sample_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    std::ofstream output(filename, std::ios::binary);
+    if (!output) {
+        fail("failed to write heightmap export: " + display_path(filename));
+    }
+    output.write(reinterpret_cast<const char*>(heightmap), static_cast<std::streamsize>(sample_count * sizeof(float)));
+    if (!output) {
+        fail("failed to write heightmap export: " + display_path(filename));
+    }
+
+    const fs::path metadata_path = fs::path(filename.string() + ".json");
+    std::ofstream metadata(metadata_path, std::ios::binary);
+    if (!metadata) {
+        fail("failed to write heightmap metadata: " + display_path(metadata_path));
+    }
+    metadata << "{\n";
+    metadata << "  \"width\": " << width << ",\n";
+    metadata << "  \"height\": " << height << ",\n";
+    metadata << "  \"format\": \"float32\",\n";
+    metadata << "  \"endianness\": \"little\",\n";
+    metadata << "  \"layout\": \"row-major\",\n";
+    metadata << "  \"origin\": \"top-left\"\n";
+    metadata << "}\n";
+    if (!metadata) {
+        fail("failed to write heightmap metadata: " + display_path(metadata_path));
+    }
+}
+
+fs::path metadata_sidecar_path(const fs::path& filename)
+{
+    return fs::path(filename.string() + ".json");
+}
+
+bool try_read_sidecar_metadata(const fs::path& filename, TopographyCodec::Metadata& metadata)
+{
+    const fs::path sidecar = metadata_sidecar_path(filename);
+    return fs::exists(sidecar) &&
+           readTopographyMetadataJson(sidecar.string().c_str(), metadata) == 0;
+}
+
+std::vector<uint16_t> encode_metric_heightmap(const float* heightmap, int width, int height,
+                                              uint16_t sea_level_m)
+{
+    const size_t sample_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    std::vector<uint16_t> metric_heightmap(sample_count);
+    for (size_t i = 0; i < sample_count; ++i) {
+        metric_heightmap[i] = TopographyCodec::internal_to_meters(heightmap[i], sea_level_m);
+    }
+    return metric_heightmap;
+}
+
+void export_metric_heightmap(const float* heightmap, int width, int height, uint16_t sea_level_m,
+                             const fs::path& raw_path, const fs::path& png16_path)
+{
+    const std::vector<uint16_t> metric_heightmap =
+        encode_metric_heightmap(heightmap, width, height, sea_level_m);
+
+    if (writeRawR16(raw_path.string().c_str(), metric_heightmap.data(), metric_heightmap.size()) != 0) {
+        fail("failed to write metric heightmap: " + display_path(raw_path));
+    }
+
+    if (writeImageGray16(png16_path.string().c_str(), width, height, metric_heightmap.data(),
+                         "Plate Tectonics Metric Heightmap") != 0) {
+        fail("failed to write metric PNG16: " + display_path(png16_path));
+    }
+
+    TopographyCodec::Metadata raw_metadata;
+    raw_metadata.width = static_cast<uint32_t>(width);
+    raw_metadata.height = static_cast<uint32_t>(height);
+    raw_metadata.sea_level_m = sea_level_m;
+    raw_metadata.format = TopographyCodec::kMetricFormatR16;
+    raw_metadata.endianness = TopographyCodec::kLittleEndian;
+    if (writeTopographyMetadataJson(metadata_sidecar_path(raw_path).string().c_str(), raw_metadata) != 0) {
+        fail("failed to write metric metadata: " + display_path(metadata_sidecar_path(raw_path)));
+    }
+
+    TopographyCodec::Metadata png_metadata = raw_metadata;
+    png_metadata.format = TopographyCodec::kMetricFormatPng16;
+    png_metadata.endianness = TopographyCodec::kBigEndian;
+    if (writeTopographyMetadataJson(metadata_sidecar_path(png16_path).string().c_str(), png_metadata) != 0) {
+        fail("failed to write PNG16 metadata: " + display_path(metadata_sidecar_path(png16_path)));
+    }
+}
+
+uint16_t infer_metric_sea_level_with_warning(const std::vector<uint16_t>& heightmap_m,
+                                             const fs::path& source_path)
+{
+    fprintf(stderr,
+            "warning: no sea_level_m metadata for %s; falling back to %.2f ocean coverage quantile\n",
+            display_path(source_path).c_str(), kSeaLevel);
+    return TopographyCodec::infer_metric_sea_level(heightmap_m.data(), heightmap_m.size(), kSeaLevel);
+}
+
+void save_image(const float* heightmap, const fs::path& filename, int width, int height, bool colors,
+                const NormalizationRange& normalization_range, float display_min,
+                float display_max, ToneMapMode tone_map)
 {
     std::vector<float> copy(heightmap,
                             heightmap + static_cast<size_t>(width) * static_cast<size_t>(height));
-    normalize(copy.data(), width * height);
+    apply_normalization_range(copy, normalization_range);
+    apply_display_mapping(copy, display_min, display_max, tone_map);
 
     const int result = colors
         ? writeImageColors(filename.string().c_str(), width, height, copy.data(), "Plate Tectonics")
@@ -560,17 +995,21 @@ void overlay_boundaries(const BoundaryOverlayData& data, int width, int height, 
 }
 
 void save_image(void* simulation, const fs::path& filename, int width, int height, bool colors,
-                bool show_boundaries, const BoundaryOverlayData* fallback_boundaries = nullptr)
+                const NormalizationRange& normalization_range, float display_min,
+                float display_max, ToneMapMode tone_map, bool show_boundaries,
+                const BoundaryOverlayData* fallback_boundaries = nullptr)
 {
     if (!show_boundaries) {
-        save_image(platec_api_get_heightmap(simulation), filename, width, height, colors);
+        save_image(platec_api_get_heightmap(simulation), filename, width, height, colors,
+                   normalization_range, display_min, display_max, tone_map);
         return;
     }
 
     std::vector<float> copy(platec_api_get_heightmap(simulation),
                             platec_api_get_heightmap(simulation) +
                                 static_cast<size_t>(width) * static_cast<size_t>(height));
-    normalize(copy.data(), width * height);
+    apply_normalization_range(copy, normalization_range);
+    apply_display_mapping(copy, display_min, display_max, tone_map);
 
     std::vector<png_byte> rgb;
     if (colors) {
@@ -662,45 +1101,140 @@ int main(int argc, char* argv[])
 {
     Params params = fill_params(argc, argv);
     std::vector<float> input_heightmap;
+    std::vector<uint16_t> input_metric_heightmap;
     std::vector<fs::path> gif_frames;
     std::vector<fs::path> gif_temp_files;
     std::vector<fs::path> step_outputs;
     BoundaryOverlayData last_boundary_state;
+    NormalizationRange normalization_range;
+    TopographyCodec::Metadata input_metadata;
+    bool has_input_metadata = false;
     fs::path resolved_input_path;
-    fs::path final_output_path;
+    fs::path preview_output_path;
     fs::path gif_output_path;
-    std::string output_label;
+    fs::path debug_output_path;
+    fs::path data_r16_output_path;
+    fs::path data_png16_output_path;
+    std::string preview_label;
     std::string gif_label;
+    std::string debug_label;
+    std::string data_r16_label;
+    std::string data_png16_label;
     std::string run_stem;
     uint32_t run_index = 0;
 
-    if (!params.input_path.empty()) {
-        resolved_input_path = resolve_input_path(params.input_path);
+    if (params.input_mode != InputMode::Procedural) {
+        const char* default_extension =
+            params.input_mode == InputMode::MetricR16 ? ".r16" : ".png";
+        resolved_input_path = resolve_input_path(params.input_path, default_extension);
 
-        int input_width = 0;
-        int input_height = 0;
-        if (readImageNormalized(resolved_input_path.string().c_str(), input_heightmap, input_width,
-                                input_height) != 0) {
-            fail("failed to read input image: " + display_path(resolved_input_path));
+        if (params.input_mode == InputMode::LegacyNormalizedPng) {
+            int input_width = 0;
+            int input_height = 0;
+            if (readImageNormalized(resolved_input_path.string().c_str(), input_heightmap, input_width,
+                                    input_height) != 0) {
+                fail("failed to read input image: " + display_path(resolved_input_path));
+            }
+            params.width = static_cast<uint32_t>(input_width);
+            params.height = static_cast<uint32_t>(input_height);
+        } else if (params.input_mode == InputMode::MetricPng16) {
+            int input_width = 0;
+            int input_height = 0;
+            if (readImageGray16(resolved_input_path.string().c_str(), input_metric_heightmap,
+                                input_width, input_height) != 0) {
+                fail("failed to read metric PNG16: " + display_path(resolved_input_path));
+            }
+            params.width = static_cast<uint32_t>(input_width);
+            params.height = static_cast<uint32_t>(input_height);
+            has_input_metadata = try_read_sidecar_metadata(resolved_input_path, input_metadata);
+            if (has_input_metadata &&
+                (input_metadata.width != params.width || input_metadata.height != params.height)) {
+                fail("metric PNG16 sidecar dimensions do not match the image");
+            }
+        } else if (params.input_mode == InputMode::MetricR16) {
+            has_input_metadata = try_read_sidecar_metadata(resolved_input_path, input_metadata);
+            if (has_input_metadata) {
+                if (params.custom_dimensions &&
+                    (input_metadata.width != params.width || input_metadata.height != params.height)) {
+                    fail("--dim does not match the .r16 sidecar dimensions");
+                }
+                params.width = input_metadata.width;
+                params.height = input_metadata.height;
+            } else if (!params.custom_dimensions) {
+                fail("--input-r16 requires .r16.json metadata or --dim WIDTH HEIGHT");
+            }
+
+            if (readRawR16(resolved_input_path.string().c_str(), input_metric_heightmap,
+                           static_cast<size_t>(params.width) * static_cast<size_t>(params.height)) != 0) {
+                fail("failed to read metric .r16: " + display_path(resolved_input_path));
+            }
         }
-
-        params.width = static_cast<uint32_t>(input_width);
-        params.height = static_cast<uint32_t>(input_height);
 
         fs::create_directories(kDefaultOutputDir);
         run_stem = resolved_input_path.stem().string();
         run_index = next_run_index(kDefaultOutputDir, run_stem);
-        final_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".png");
+        preview_output_path =
+            kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + "_preview.png");
         gif_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".gif");
-        output_label = display_path(final_output_path);
+        debug_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".f32");
+        data_r16_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".r16");
+        data_png16_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".png");
+        preview_label = display_path(preview_output_path);
         gif_label = display_path(gif_output_path);
+        debug_label = display_path(debug_output_path);
+        data_r16_label = display_path(data_r16_output_path);
+        data_png16_label = display_path(data_png16_output_path);
     } else {
         run_stem = params.filename;
-        final_output_path = params.filename + ".png";
+        preview_output_path = params.filename + "_preview.png";
         gif_output_path = params.filename + ".gif";
-        output_label = display_path(final_output_path);
+        debug_output_path = params.filename + ".f32";
+        data_r16_output_path = params.filename + ".r16";
+        data_png16_output_path = params.filename + ".png";
+        preview_label = display_path(preview_output_path);
         gif_label = display_path(gif_output_path);
+        debug_label = display_path(debug_output_path);
+        data_r16_label = display_path(data_r16_output_path);
+        data_png16_label = display_path(data_png16_output_path);
     }
+
+    const int32_t sea_level_override_m =
+        (params.input_mode == InputMode::Procedural && params.has_sea_level_m)
+            ? static_cast<int32_t>(params.sea_level_m)
+            : TopographyCodec::kNoSeaLevelOverride;
+
+    void* simulation = platec_api_create(params.seed, params.width, params.height, kSeaLevel,
+                                         params.erosion_period, params.folding_ratio,
+                                         params.aggregation_overlap_abs,
+                                         params.aggregation_overlap_rel, params.cycles,
+                                         params.plates,
+                                         params.erosion_strength, params.landmass_rotation,
+                                         params.rotation_strength,
+                                         params.subduction_strength, sea_level_override_m);
+
+    if (!input_heightmap.empty()) {
+        platec_api_load_heightmap_raw(simulation, input_heightmap.data());
+    } else if (!input_metric_heightmap.empty()) {
+        uint16_t metric_sea_level_m = 0;
+        if (has_input_metadata) {
+            metric_sea_level_m = input_metadata.sea_level_m;
+            if (params.has_sea_level_m && metric_sea_level_m != params.sea_level_m) {
+                fprintf(stderr,
+                        "warning: %s metadata sea_level_m=%u overrides CLI value %u\n",
+                        display_path(resolved_input_path).c_str(), metric_sea_level_m,
+                        params.sea_level_m);
+            }
+        } else if (params.has_sea_level_m) {
+            metric_sea_level_m = params.sea_level_m;
+        } else {
+            metric_sea_level_m =
+                infer_metric_sea_level_with_warning(input_metric_heightmap, resolved_input_path);
+        }
+
+        platec_api_load_heightmap_u16(simulation, input_metric_heightmap.data(), metric_sea_level_m);
+    }
+
+    const uint16_t active_sea_level_m = platec_api_get_sea_level_m(simulation);
 
     printf("Plate-tectonics simulation example\n");
     printf(" seed     : %u\n", params.seed);
@@ -709,14 +1243,32 @@ int main(int argc, char* argv[])
     printf(" map      : %s\n", params.colors ? "colors" : "grayscale");
     printf(" cycles   : %u\n", params.cycles);
     printf(" plates   : %u\n", params.plates);
+    printf(" aggregate: abs %u, rel %.3f\n", params.aggregation_overlap_abs,
+           params.aggregation_overlap_rel);
+    printf(" folding  : %.3f\n", params.folding_ratio);
     printf(" erosion  : every %u updates, strength %.2f\n", params.erosion_period,
            params.erosion_strength);
     printf(" rotation : motion %.2f, landmass %.2f\n", params.rotation_strength,
            params.landmass_rotation);
+    printf(" subduct  : %.2f\n", params.subduction_strength);
+    printf(" sea lvl  : %u m\n", active_sea_level_m);
+    if (params.normalize_output) {
+        printf(" normalize: first-frame [%.2f, %.2f]\n", params.min_initial_height,
+               params.max_initial_height);
+    } else {
+        printf(" normalize: no\n");
+    }
+    printf(" display  : [%.2f, %.2f], tone=%s\n", params.display_min, params.display_max,
+           tone_map_name(params.tone_map));
     if (!resolved_input_path.empty()) {
         printf(" input    : %s\n", display_path(resolved_input_path).c_str());
     }
-    printf(" output   : %s\n", output_label.c_str());
+    printf(" preview  : %s\n", preview_label.c_str());
+    printf(" data r16 : %s\n", data_r16_label.c_str());
+    printf(" data png : %s\n", data_png16_label.c_str());
+    if (params.export_heightmap_f32) {
+        printf(" debug f32: %s\n", debug_label.c_str());
+    }
     if (params.make_gif) {
         printf(" gif      : %s\n", gif_label.c_str());
         printf(" keep png : %s\n", params.delete_gif_frames ? "no" : "yes");
@@ -731,15 +1283,11 @@ int main(int argc, char* argv[])
     }
     printf("\n");
 
-    void* simulation = platec_api_create(params.seed, params.width, params.height, kSeaLevel,
-                                         params.erosion_period, kFoldingRatio, kAggrOverlapAbs,
-                                         kAggrOverlapRel, params.cycles, params.plates,
-                                         params.erosion_strength, params.landmass_rotation,
-                                         params.rotation_strength);
-
-    if (!input_heightmap.empty()) {
-        platec_api_load_heightmap(simulation, input_heightmap.data(), kSeaLevel);
-    }
+    normalization_range =
+        capture_normalization_range(platec_api_get_heightmap(simulation),
+                                    static_cast<int>(params.width * params.height),
+                                    params.normalize_output, params.min_initial_height,
+                                    params.max_initial_height);
 
     if (params.show_boundaries) {
         capture_boundary_overlay(simulation, static_cast<int>(params.width),
@@ -751,7 +1299,9 @@ int main(int argc, char* argv[])
             (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
             frame_file_name(run_stem, run_index, 0);
         save_image(simulation, frame_path, static_cast<int>(params.width),
-                   static_cast<int>(params.height), params.colors, params.show_boundaries,
+                   static_cast<int>(params.height), params.colors, normalization_range,
+                   params.display_min, params.display_max, params.tone_map,
+                   params.show_boundaries,
                    &last_boundary_state);
         gif_frames.push_back(frame_path);
         gif_temp_files.push_back(frame_path);
@@ -768,7 +1318,9 @@ int main(int argc, char* argv[])
                 (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
                 frame_file_name(run_stem, run_index, step);
             save_image(simulation, frame_path, static_cast<int>(params.width),
-                       static_cast<int>(params.height), params.colors, params.show_boundaries,
+                       static_cast<int>(params.height), params.colors, normalization_range,
+                       params.display_min, params.display_max, params.tone_map,
+                       params.show_boundaries,
                        &boundary_before_step);
             gif_frames.push_back(frame_path);
             gif_temp_files.push_back(frame_path);
@@ -779,7 +1331,9 @@ int main(int argc, char* argv[])
                 (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
                 step_file_name(run_stem, run_index, step);
             save_image(simulation, step_output_path, static_cast<int>(params.width),
-                       static_cast<int>(params.height), params.colors, params.show_boundaries,
+                       static_cast<int>(params.height), params.colors, normalization_range,
+                       params.display_min, params.display_max, params.tone_map,
+                       params.show_boundaries,
                        &boundary_before_step);
             step_outputs.push_back(step_output_path);
             if (params.make_gif) {
@@ -794,13 +1348,24 @@ int main(int argc, char* argv[])
         }
     }
 
-    save_image(simulation, final_output_path, static_cast<int>(params.width),
-               static_cast<int>(params.height), params.colors, params.show_boundaries,
+    save_image(simulation, preview_output_path, static_cast<int>(params.width),
+               static_cast<int>(params.height), params.colors, normalization_range,
+               params.display_min, params.display_max, params.tone_map,
+               params.show_boundaries,
                &last_boundary_state);
+
+    export_metric_heightmap(platec_api_get_heightmap(simulation), static_cast<int>(params.width),
+                            static_cast<int>(params.height), active_sea_level_m,
+                            data_r16_output_path, data_png16_output_path);
+
+    if (params.export_heightmap_f32) {
+        export_heightmap_f32(platec_api_get_heightmap(simulation), debug_output_path,
+                             static_cast<int>(params.width), static_cast<int>(params.height));
+    }
 
     if (params.make_gif) {
         if (params.step != 0 && (gif_frames.empty() || step % params.step != 0)) {
-            gif_frames.push_back(final_output_path);
+            gif_frames.push_back(preview_output_path);
         }
         create_gif(gif_output_path, gif_frames);
         if (params.delete_gif_frames) {
@@ -812,7 +1377,12 @@ int main(int argc, char* argv[])
         }
     }
 
-    printf(" * simulation completed (filename %s)\n", output_label.c_str());
+    printf(" * preview exported (filename %s)\n", preview_label.c_str());
+    printf(" * metric heightmap exported (filename %s)\n", data_r16_label.c_str());
+    printf(" * metric PNG16 exported (filename %s)\n", data_png16_label.c_str());
+    if (params.export_heightmap_f32) {
+        printf(" * debug float32 exported (filename %s)\n", debug_label.c_str());
+    }
     if (params.make_gif) {
         printf(" * gif created (filename %s)\n", gif_label.c_str());
     }

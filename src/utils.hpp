@@ -25,6 +25,9 @@
 #include <string>
 
 #if _WIN32 || _WIN64
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
     #include <Windows.h>
 typedef UINT32 uint32_t;
 typedef INT32 int32_t;

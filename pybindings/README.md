@@ -39,6 +39,10 @@ while platec.is_finished(p) == 0:
 # Get the heightmap
 hm = platec.get_heightmap(p)
 
+# Metric helpers
+platec.load_heightmap_u16(p, [0] * (512 * 512), 32000)
+sea_level_m = platec.get_sea_level_m(p)
+
 # Clean up
 platec.destroy(p)
 ```
@@ -89,6 +93,23 @@ p = platec.create(
 p = platec.create(3, 1000, 800, 0.65, 60, 0.02, 1000000, 0.33, 2, 10)
 # Run simulation...
 ```
+
+### platec.load_heightmap_u16()
+
+```python
+platec.load_heightmap_u16(pointer, metric_heightmap, sea_level_m)
+```
+
+- `metric_heightmap`: sequence of `uint16`-compatible values in `0..65535`
+- `sea_level_m`: coastline threshold in the same `0..65535` metric domain
+
+### platec.get_sea_level_m()
+
+```python
+platec.get_sea_level_m(pointer)
+```
+
+Returns the active metric coastline threshold for the simulation.
 
 ## Building from Source
 

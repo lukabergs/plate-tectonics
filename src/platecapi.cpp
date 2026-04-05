@@ -42,14 +42,16 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
                         float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
                         float erosion_strength, float crust_rotation_strength,
-                        float rotation_strength) {
+                        float rotation_strength, float subduction_strength,
+                        int32_t sea_level_m) {
     /* Miten nykyisen opengl-mainin koodit refaktoroidaan tänne?
      *    parametrien tarkistus, kommentit eli dokumentointi, muuta? */
 
     lithosphere* litho =
         new lithosphere(seed, width, height, sea_level, erosion_period, folding_ratio,
                         aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates,
-                        erosion_strength, crust_rotation_strength, rotation_strength);
+                        erosion_strength, crust_rotation_strength, rotation_strength,
+                        subduction_strength, sea_level_m);
 
     platec_api_list_elem elem(++last_id, litho);
     lithospheres.push_back(elem);
@@ -60,6 +62,7 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
 void platec_api_destroy(void* litho) {
     for (uint32_t i = 0; i < lithospheres.size(); ++i)
         if (lithospheres[i].data == litho) {
+            delete lithospheres[i].data;
             lithospheres.erase(lithospheres.begin() + i);
             break;
         }
@@ -110,6 +113,21 @@ void platec_api_step(void* pointer) {
 void platec_api_load_heightmap(void* pointer, const float* normalized_heightmap, float sea_level) {
     lithosphere* litho = static_cast<lithosphere*>(pointer);
     litho->importNormalizedHeightMap(normalized_heightmap, sea_level);
+}
+
+void platec_api_load_heightmap_raw(void* pointer, const float* normalized_heightmap) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    litho->importRawHeightMap(normalized_heightmap);
+}
+
+void platec_api_load_heightmap_u16(void* pointer, const uint16_t* heightmap_m, uint16_t sea_level_m) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    litho->importMetricHeightMap(heightmap_m, sea_level_m);
+}
+
+uint16_t platec_api_get_sea_level_m(void* pointer) {
+    lithosphere* litho = static_cast<lithosphere*>(pointer);
+    return litho->getSeaLevelMeters();
 }
 
 uint32_t platec_api_get_plate_count(void* pointer) {

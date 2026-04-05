@@ -30,6 +30,7 @@
 #include "heightmap.hpp"
 #include "rectangle.hpp"
 #include "simplerandom.hpp"
+#include "topography_codec.hpp"
 #include <cmath>
 
 using namespace std;
@@ -84,7 +85,8 @@ class lithosphere {
                 uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
                 float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
                 float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
-                float rotation_strength = 1.0f) noexcept(false);
+                float rotation_strength = 1.0f, float subduction_strength = 1.0f,
+                int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -110,7 +112,12 @@ class lithosphere {
     const uint32_t* getAgeMap() const noexcept; ///< Return surface age map.
     float* getTopography() const noexcept;      ///< Return height map.
     uint32_t* getPlatesMap() const noexcept;    ///< Return a map of the plates owning eaach point
+    uint16_t getSeaLevelMeters() const noexcept {
+        return sea_level_m;
+    }
     void importNormalizedHeightMap(const float* normalized_map, float sea_level);
+    void importRawHeightMap(const float* normalized_map);
+    void importMetricHeightMap(const uint16_t* heightmap_m, uint16_t sea_level_m);
     void update();                              ///< Simulate one step of plate tectonics.
     uint32_t getWidth() const;
     uint32_t getHeight() const;
@@ -125,6 +132,10 @@ class lithosphere {
                                        uint32_t& continental_collisions);
     uint32_t chooseDivergentOwner(uint32_t x, uint32_t y, uint32_t index) const;
     bool hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const;
+    bool isOceanic(float value) const noexcept;
+    void resetSimulationState();
+    void initializeHeightMapFromMetric(const uint16_t* heightmap_m, uint16_t sea_level_m);
+    void seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override);
     void regenerateCrust();
     void updateCollisions();
     void clearPlates();
@@ -183,6 +194,8 @@ class lithosphere {
     float erosion_strength;    ///< Scales terrain erosion.
     float crust_rotation_strength; ///< Scales visible raster rotation.
     float rotation_strength;   ///< Scales angular plate motion.
+    float subduction_strength; ///< Scales oceanic crust removed during subduction.
+    uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
 
     vector<vector<plateCollision>> collisions;
     vector<vector<plateCollision>> subductions;
