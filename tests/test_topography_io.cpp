@@ -21,33 +21,33 @@ struct ScopedDelete {
 
 } // namespace
 
-TEST(TopographyIo, RawR16RoundTrip)
+TEST(TopographyIo, RawR32RoundTrip)
 {
-    const std::vector<uint16_t> samples = {0, 1, 255, 1024, 32768, 65535};
-    const fs::path path = fs::current_path() / "topography_roundtrip.r16";
+    const std::vector<float> samples = {0.0f, 1.0f, -1.5f, 1024.25f, 32768.5f, 65535.0f};
+    const fs::path path = fs::current_path() / "topography_roundtrip.r32";
     ScopedDelete cleanup(path);
 
-    ASSERT_EQ(0, writeRawR16(path.string().c_str(), samples.data(), samples.size()));
+    ASSERT_EQ(0, writeRawR32(path.string().c_str(), samples.data(), samples.size()));
 
-    std::vector<uint16_t> loaded;
-    ASSERT_EQ(0, readRawR16(path.string().c_str(), loaded, samples.size()));
+    std::vector<float> loaded;
+    ASSERT_EQ(0, readRawR32(path.string().c_str(), loaded, samples.size()));
     EXPECT_EQ(samples, loaded);
 }
 
-TEST(TopographyIo, Png16RoundTrip)
+TEST(TopographyIo, Png32RoundTrip)
 {
     const int width = 3;
     const int height = 2;
-    const std::vector<uint16_t> samples = {0, 1, 512, 1024, 32768, 65535};
+    const std::vector<float> samples = {0.0f, 1.0f, -0.25f, 1024.5f, 32768.25f, 65535.0f};
     const fs::path path = fs::current_path() / "topography_roundtrip.png";
     ScopedDelete cleanup(path);
 
-    ASSERT_EQ(0, writeImageGray16(path.string().c_str(), width, height, samples.data(), "roundtrip"));
+    ASSERT_EQ(0, writeImageRgba32(path.string().c_str(), width, height, samples.data(), "roundtrip"));
 
-    std::vector<uint16_t> loaded;
+    std::vector<float> loaded;
     int loaded_width = 0;
     int loaded_height = 0;
-    ASSERT_EQ(0, readImageGray16(path.string().c_str(), loaded, loaded_width, loaded_height));
+    ASSERT_EQ(0, readImageRgba32(path.string().c_str(), loaded, loaded_width, loaded_height));
     EXPECT_EQ(width, loaded_width);
     EXPECT_EQ(height, loaded_height);
     EXPECT_EQ(samples, loaded);

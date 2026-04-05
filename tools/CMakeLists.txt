@@ -4,7 +4,7 @@ target_include_directories(PlateTectonicsHeightmapIO
         "${PROJECT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-target_link_libraries(PlateTectonicsHeightmapIO PUBLIC PlateTectonics PNG::PNG)
+target_link_libraries(PlateTectonicsHeightmapIO PUBLIC PlateTectonics PNG::PNG TIFF::TIFF)
 plate_tectonics_apply_common_settings(PlateTectonicsHeightmapIO)
 plate_tectonics_set_output_dirs(PlateTectonicsHeightmapIO)
 

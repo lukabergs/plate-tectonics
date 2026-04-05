@@ -21,6 +21,8 @@ constexpr const char* kBigEndian = "big";
 constexpr const char* kRowMajorLayout = "row-major";
 constexpr const char* kMetricFormatR16 = "r16";
 constexpr const char* kMetricFormatPng16 = "png16";
+constexpr const char* kMetricFormatR32 = "r32";
+constexpr const char* kMetricFormatTiff32 = "tiff32";
 constexpr const char* kMetricFormatFloat32 = "float32";
 
 struct Metadata {

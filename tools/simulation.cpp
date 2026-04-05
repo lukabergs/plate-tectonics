@@ -280,8 +280,8 @@ void print_help()
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
     printf(" --show-boundaries   : overlay convergent/divergent/transform boundaries\n");
-    printf(" output files        : img/in/<YYMMDDHHMMSS>_<seed-or-input>.r16/.r16.json and PNG16/.png.json\n");
-    printf("                       img/out/<YYMMDDHHMMSS>_<seed-or-input>.r16/.r16.json and PNG16/.png.json\n");
+    printf(" output files        : img/in/<YYMMDDHHMMSS>_<seed-or-input>.r32/.r32.json and TIFF32/.tiff.json\n");
+    printf("                       img/out/<YYMMDDHHMMSS>_<seed-or-input>.r32/.r32.json and TIFF32/.tiff.json\n");
     printf("                       img/gif/<YYMMDDHHMMSS>_<seed-or-input>.gif when --gif is used\n");
     printf("                       img/frames/<YYMMDDHHMMSS>_<seed-or-input>_<frame>.png for preview frames\n");
 }
@@ -791,12 +791,11 @@ std::vector<uint16_t> encode_metric_heightmap(const float* heightmap, int width,
 }
 
 void export_metric_heightmap(const float* heightmap, int width, int height, uint16_t sea_level_m,
-                             const fs::path& raw_path, const fs::path& png_path)
+                             const fs::path& raw_path, const fs::path& image_path)
 {
-    const std::vector<uint16_t> metric_heightmap =
-        encode_metric_heightmap(heightmap, width, height, sea_level_m);
+    const size_t sample_count = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    if (writeRawR16(raw_path.string().c_str(), metric_heightmap.data(), metric_heightmap.size()) != 0) {
+    if (writeRawR32(raw_path.string().c_str(), heightmap, sample_count) != 0) {
         fail("failed to write metric heightmap: " + display_path(raw_path));
     }
 
@@ -804,22 +803,21 @@ void export_metric_heightmap(const float* heightmap, int width, int height, uint
     raw_metadata.width = static_cast<uint32_t>(width);
     raw_metadata.height = static_cast<uint32_t>(height);
     raw_metadata.sea_level_m = sea_level_m;
-    raw_metadata.format = TopographyCodec::kMetricFormatR16;
+    raw_metadata.format = TopographyCodec::kMetricFormatR32;
     raw_metadata.endianness = TopographyCodec::kLittleEndian;
     if (writeTopographyMetadataJson(metadata_sidecar_path(raw_path).string().c_str(), raw_metadata) != 0) {
         fail("failed to write metric metadata: " + display_path(metadata_sidecar_path(raw_path)));
     }
 
-    if (writeImageGray16(png_path.string().c_str(), width, height, metric_heightmap.data(),
-                         "Plate Tectonics Metric Heightmap") != 0) {
-        fail("failed to write metric PNG16: " + display_path(png_path));
+    if (writeImageGrayTiff32(image_path.string().c_str(), width, height, heightmap) != 0) {
+        fail("failed to write metric TIFF32: " + display_path(image_path));
     }
 
-    TopographyCodec::Metadata png_metadata = raw_metadata;
-    png_metadata.format = TopographyCodec::kMetricFormatPng16;
-    png_metadata.endianness = TopographyCodec::kBigEndian;
-    if (writeTopographyMetadataJson(metadata_sidecar_path(png_path).string().c_str(), png_metadata) != 0) {
-        fail("failed to write PNG16 metadata: " + display_path(metadata_sidecar_path(png_path)));
+    TopographyCodec::Metadata image_metadata = raw_metadata;
+    image_metadata.format = TopographyCodec::kMetricFormatTiff32;
+    image_metadata.endianness = TopographyCodec::kLittleEndian;
+    if (writeTopographyMetadataJson(metadata_sidecar_path(image_path).string().c_str(), image_metadata) != 0) {
+        fail("failed to write TIFF32 metadata: " + display_path(metadata_sidecar_path(image_path)));
     }
 }
 
@@ -1142,14 +1140,14 @@ int main(int argc, char* argv[])
     TopographyCodec::Metadata input_metadata;
     bool has_input_metadata = false;
     fs::path resolved_input_path;
-    fs::path initial_png_output_path;
-    fs::path final_png_output_path;
+    fs::path initial_image_output_path;
+    fs::path final_image_output_path;
     fs::path gif_output_path;
     fs::path debug_output_path;
     fs::path initial_r16_output_path;
     fs::path final_r16_output_path;
-    std::string initial_png_label;
-    std::string final_png_label;
+    std::string initial_image_label;
+    std::string final_image_label;
     std::string gif_label;
     std::string debug_label;
     std::string initial_r16_label;
@@ -1208,14 +1206,14 @@ int main(int argc, char* argv[])
     ensure_output_directories();
     const std::time_t started_at = std::time(nullptr);
     run_id = make_run_id(params, resolved_input_path, started_at);
-    initial_png_output_path = kDefaultInputDir / (run_id + ".png");
-    final_png_output_path = kDefaultOutputDir / (run_id + ".png");
+    initial_image_output_path = kDefaultInputDir / (run_id + ".tiff");
+    final_image_output_path = kDefaultOutputDir / (run_id + ".tiff");
     gif_output_path = kDefaultGifDir / (run_id + ".gif");
-    debug_output_path = kDefaultOutputDir / (run_id + ".f32");
-    initial_r16_output_path = kDefaultInputDir / (run_id + ".r16");
-    final_r16_output_path = kDefaultOutputDir / (run_id + ".r16");
-    initial_png_label = display_path(initial_png_output_path);
-    final_png_label = display_path(final_png_output_path);
+    debug_output_path = kDefaultOutputDir / (run_id + ".debug.f32");
+    initial_r16_output_path = kDefaultInputDir / (run_id + ".r32");
+    final_r16_output_path = kDefaultOutputDir / (run_id + ".r32");
+    initial_image_label = display_path(initial_image_output_path);
+    final_image_label = display_path(final_image_output_path);
     gif_label = display_path(gif_output_path);
     debug_label = display_path(debug_output_path);
     initial_r16_label = display_path(initial_r16_output_path);
@@ -1292,10 +1290,10 @@ int main(int argc, char* argv[])
     if (!resolved_input_path.empty()) {
         printf(" input    : %s\n", display_path(resolved_input_path).c_str());
     }
-    printf(" init r16 : %s\n", initial_r16_label.c_str());
-    printf(" init png16: %s\n", initial_png_label.c_str());
-    printf(" final r16: %s\n", final_r16_label.c_str());
-    printf(" final png16: %s\n", final_png_label.c_str());
+    printf(" init r32 : %s\n", initial_r16_label.c_str());
+    printf(" init tiff32: %s\n", initial_image_label.c_str());
+    printf(" final r32: %s\n", final_r16_label.c_str());
+    printf(" final tiff32: %s\n", final_image_label.c_str());
     if (params.export_heightmap_f32) {
         printf(" debug f32: %s\n", debug_label.c_str());
     }
@@ -1328,7 +1326,7 @@ int main(int argc, char* argv[])
 
     export_metric_heightmap(platec_api_get_heightmap(simulation), static_cast<int>(params.width),
                             static_cast<int>(params.height), active_sea_level_m,
-                            initial_r16_output_path, initial_png_output_path);
+                            initial_r16_output_path, initial_image_output_path);
 
     uint32_t saved_frame_count = 0;
     const auto save_frame = [&](const BoundaryOverlayData* fallback_boundaries) {
@@ -1377,7 +1375,7 @@ int main(int argc, char* argv[])
 
     export_metric_heightmap(platec_api_get_heightmap(simulation), static_cast<int>(params.width),
                             static_cast<int>(params.height), active_sea_level_m,
-                            final_r16_output_path, final_png_output_path);
+                            final_r16_output_path, final_image_output_path);
 
     if (params.export_heightmap_f32) {
         export_heightmap_f32(platec_api_get_heightmap(simulation), debug_output_path,
@@ -1403,9 +1401,9 @@ int main(int argc, char* argv[])
     }
 
     printf(" * initial metric heightmap exported (filename %s)\n", initial_r16_label.c_str());
-    printf(" * initial metric PNG16 exported (filename %s)\n", initial_png_label.c_str());
+    printf(" * initial metric TIFF32 exported (filename %s)\n", initial_image_label.c_str());
     printf(" * final metric heightmap exported (filename %s)\n", final_r16_label.c_str());
-    printf(" * final metric PNG16 exported (filename %s)\n", final_png_label.c_str());
+    printf(" * final metric TIFF32 exported (filename %s)\n", final_image_label.c_str());
     if (params.export_heightmap_f32) {
         printf(" * debug float32 exported (filename %s)\n", debug_label.c_str());
     }

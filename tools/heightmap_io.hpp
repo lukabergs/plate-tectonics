@@ -27,6 +27,12 @@ int writeImageGray16(const char* filename, int width, int height, const uint16_t
 int readImageGray16(const char* filename, std::vector<uint16_t>& heightmap, int& width, int& height);
 int writeRawR16(const char* filename, const uint16_t* heightmap, size_t sample_count);
 int readRawR16(const char* filename, std::vector<uint16_t>& heightmap, size_t expected_sample_count);
+int writeImageRgba32(const char* filename, int width, int height, const float* heightmap,
+                     const char* title);
+int readImageRgba32(const char* filename, std::vector<float>& heightmap, int& width, int& height);
+int writeImageGrayTiff32(const char* filename, int width, int height, const float* heightmap);
+int writeRawR32(const char* filename, const float* heightmap, size_t sample_count);
+int readRawR32(const char* filename, std::vector<float>& heightmap, size_t expected_sample_count);
 int writeTopographyMetadataJson(const char* filename, const TopographyCodec::Metadata& metadata);
 int readTopographyMetadataJson(const char* filename, TopographyCodec::Metadata& metadata);
 

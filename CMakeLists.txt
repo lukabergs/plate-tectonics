@@ -99,6 +99,7 @@ plate_tectonics_set_output_dirs(PlateTectonics)
 
 if(BUILD_TESTING OR PLATE_TECTONICS_BUILD_SIMULATION)
     find_package(PNG REQUIRED)
+    find_package(TIFF REQUIRED)
     add_subdirectory(tools)
 endif()
 

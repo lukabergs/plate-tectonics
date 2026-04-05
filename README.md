@@ -31,14 +31,14 @@ Output Rules
 
 Each run gets one id: `<YYMMDDHHMMSS>_<SEED-or-INPUTIMGNAME>`.
 
-- Initial state: `img/in/<id>.r16` and `img/in/<id>.png`
-- Final state: `img/out/<id>.r16` and `img/out/<id>.png`
+- Initial state: `img/in/<id>.r32` and `img/in/<id>.tiff`
+- Final state: `img/out/<id>.r32` and `img/out/<id>.tiff`
 - GIF: `img/gif/<id>.gif`
 - Frames: `img/frames/<id>_<NUMOFFRAME>.png`
-- Raw metric exports also write sidecars next to both `.r16` and `.png`: `.r16.json` and `.png.json`
+- Raw metric exports also write sidecars next to both `.r32` and `.tiff`: `.r32.json` and `.tiff.json`
 - `--export-heightmap-f32` writes `img/out/<id>.f32` and `.f32.json`
 
-The `.r16` file and the `.png` file are the authoritative metric heightmap exports. The `.png` file is 16-bit grayscale metric data, not a preview render. Human preview images are only written to `img/frames/` and into GIFs.
+The `.r32` file and the `.tiff` file are the authoritative 32-bit heightmap exports. The `.tiff` file stores grayscale float32 samples directly, not a preview render. Human preview images are only written to `img/frames/` and into GIFs.
 
 Simulation Usage
 ================

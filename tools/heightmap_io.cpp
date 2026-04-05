@@ -1,5 +1,6 @@
 #include "heightmap_io.hpp"
 #include "utils.hpp"
+#include <tiffio.h>
 #include <cctype>
 #include <fstream>
 #include <iterator>
@@ -714,6 +715,306 @@ int readRawR16(const char* filename, std::vector<uint16_t>& heightmap, size_t ex
             return 1;
         }
         heightmap[i] = static_cast<uint16_t>(bytes[0] | (static_cast<uint16_t>(bytes[1]) << 8));
+    }
+
+    return 0;
+}
+
+int writeImageRgba32(const char* filename, int width, int height, const float* heightmap,
+                     const char* title)
+{
+    volatile int code = 0;
+    FILE * volatile fp = nullptr;
+    png_structp volatile png_ptr = nullptr;
+    png_infop volatile info_ptr = nullptr;
+    std::vector<png_byte> row;
+
+#ifdef _WIN32
+    FILE* fp_temp = nullptr;
+    errno_t err = fopen_s(&fp_temp, filename, "wb");
+    fp = fp_temp;
+    if (err != 0 || fp == nullptr) {
+#else
+    fp = fopen(filename, "wb");
+    if (fp == nullptr) {
+#endif
+        fprintf(stderr, "Could not open file %s for writing\n", filename);
+        code = 1;
+        goto finalise;
+    }
+
+    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (png_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate write struct\n");
+        code = 1;
+        goto finalise;
+    }
+
+    info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate info struct\n");
+        code = 1;
+        goto finalise;
+    }
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4611)
+#endif
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Error during png creation\n");
+        code = 1;
+        goto finalise;
+    }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+    png_init_io(png_ptr, fp);
+    png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_RGBA,
+                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+    if (title != nullptr) {
+        png_text title_text;
+        title_text.compression = PNG_TEXT_COMPRESSION_NONE;
+        title_text.key = const_cast<char*>("Title");
+        title_text.text = const_cast<char*>(title);
+        png_set_text(png_ptr, info_ptr, &title_text, 1);
+    }
+
+    png_write_info(png_ptr, info_ptr);
+
+    row.resize(static_cast<size_t>(width) * 4U);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float sample =
+                heightmap[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)];
+            uint32_t bits = 0;
+            static_assert(sizeof(bits) == sizeof(sample), "float32 PNG packing expects 32-bit float");
+            std::memcpy(&bits, &sample, sizeof(bits));
+            const size_t base = static_cast<size_t>(x) * 4U;
+            row[base] = static_cast<png_byte>(bits & 0xFFU);
+            row[base + 1U] = static_cast<png_byte>((bits >> 8) & 0xFFU);
+            row[base + 2U] = static_cast<png_byte>((bits >> 16) & 0xFFU);
+            row[base + 3U] = static_cast<png_byte>((bits >> 24) & 0xFFU);
+        }
+        png_write_row(png_ptr, row.data());
+    }
+    png_write_end(png_ptr, nullptr);
+
+finalise:
+    if (fp != nullptr) fclose(fp);
+    if (png_ptr != nullptr) {
+        if (info_ptr != nullptr) {
+            png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
+        }
+        {
+            png_structp png_ptr_nv = png_ptr;
+            png_destroy_write_struct(&png_ptr_nv, (png_infopp)nullptr);
+        }
+    }
+
+    return code;
+}
+
+int readImageRgba32(const char* filename, std::vector<float>& heightmap, int& width, int& height)
+{
+    volatile int code = 1;
+    FILE * volatile fp = nullptr;
+    png_structp volatile png_ptr = nullptr;
+    png_infop volatile info_ptr = nullptr;
+    png_bytep volatile image_data = nullptr;
+    png_bytep* volatile rows = nullptr;
+    png_uint_32 png_width = 0;
+    png_uint_32 png_height = 0;
+    int bit_depth = 0;
+    int color_type = 0;
+    png_size_t row_bytes = 0;
+
+#ifdef _WIN32
+    FILE* fp_temp = nullptr;
+    errno_t err = fopen_s(&fp_temp, filename, "rb");
+    fp = fp_temp;
+    if (err != 0 || fp == nullptr) {
+#else
+    fp = fopen(filename, "rb");
+    if (fp == nullptr) {
+#endif
+        fprintf(stderr, "Could not open file %s for reading\n", filename);
+        goto finalise;
+    }
+
+    png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (png_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate read struct\n");
+        goto finalise;
+    }
+
+    info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == nullptr) {
+        fprintf(stderr, "Could not allocate info struct\n");
+        goto finalise;
+    }
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4611)
+#endif
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Error during png read\n");
+        goto finalise;
+    }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+    png_init_io(png_ptr, fp);
+    png_read_info(png_ptr, info_ptr);
+
+    png_width = png_get_image_width(png_ptr, info_ptr);
+    png_height = png_get_image_height(png_ptr, info_ptr);
+    bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+    color_type = png_get_color_type(png_ptr, info_ptr);
+
+    if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_RGBA) {
+        fprintf(stderr, "Expected 32-bit RGBA PNG in %s\n", filename);
+        goto finalise;
+    }
+
+    png_read_update_info(png_ptr, info_ptr);
+
+    width = static_cast<int>(png_width);
+    height = static_cast<int>(png_height);
+    heightmap.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+
+    row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+    image_data = static_cast<png_bytep>(malloc(row_bytes * png_height));
+    rows = static_cast<png_bytep*>(malloc(sizeof(png_bytep) * png_height));
+    if (image_data == nullptr || rows == nullptr) {
+        fprintf(stderr, "Could not allocate PNG32 buffers\n");
+        goto finalise;
+    }
+
+    for (png_uint_32 y = 0; y < png_height; ++y) {
+        rows[y] = image_data + y * row_bytes;
+    }
+
+    {
+        png_structp png_ptr_nv = png_ptr;
+        png_infop info_ptr_nv = info_ptr;
+        png_bytep* rows_nv = rows;
+        png_read_image(png_ptr_nv, rows_nv);
+        png_read_end(png_ptr_nv, info_ptr_nv);
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const png_bytep row = rows[y];
+        for (int x = 0; x < width; ++x) {
+            const size_t index =
+                static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x);
+            const size_t base = static_cast<size_t>(x) * 4U;
+            const uint32_t bits =
+                static_cast<uint32_t>(row[base]) |
+                (static_cast<uint32_t>(row[base + 1U]) << 8) |
+                (static_cast<uint32_t>(row[base + 2U]) << 16) |
+                (static_cast<uint32_t>(row[base + 3U]) << 24);
+            std::memcpy(&heightmap[index], &bits, sizeof(bits));
+        }
+    }
+
+    code = 0;
+
+finalise:
+    if (fp != nullptr) fclose(fp);
+    if (image_data != nullptr) free(const_cast<png_bytep>(image_data));
+    if (rows != nullptr) free(const_cast<png_bytep*>(rows));
+    if (png_ptr != nullptr) {
+        if (info_ptr != nullptr) {
+            png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
+        }
+        {
+            png_structp png_ptr_nv = png_ptr;
+            png_destroy_read_struct(&png_ptr_nv, (png_infopp)nullptr, (png_infopp)nullptr);
+        }
+    }
+    if (code != 0) {
+        heightmap.clear();
+        width = 0;
+        height = 0;
+    }
+    return code;
+}
+
+int writeImageGrayTiff32(const char* filename, int width, int height, const float* heightmap)
+{
+    TIFF* tif = TIFFOpen(filename, "w");
+    if (tif == nullptr) {
+        return 1;
+    }
+
+    const uint32_t image_width = static_cast<uint32_t>(width);
+    const uint32_t image_height = static_cast<uint32_t>(height);
+    const tsize_t row_bytes = static_cast<tsize_t>(static_cast<size_t>(width) * sizeof(float));
+    int code = 0;
+
+    if (TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, image_width) != 1 ||
+        TIFFSetField(tif, TIFFTAG_IMAGELENGTH, image_height) != 1 ||
+        TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 1) != 1 ||
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 32) != 1 ||
+        TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_IEEEFP) != 1 ||
+        TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG) != 1 ||
+        TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK) != 1 ||
+        TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_NONE) != 1 ||
+        TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, 1) != 1) {
+        TIFFClose(tif);
+        return 1;
+    }
+
+    for (uint32_t y = 0; y < image_height; ++y) {
+        const float* row = heightmap + static_cast<size_t>(y) * static_cast<size_t>(width);
+        if (TIFFWriteScanline(tif, const_cast<float*>(row), y, 0) < 0) {
+            code = 1;
+            break;
+        }
+    }
+
+    (void)row_bytes;
+    TIFFClose(tif);
+    return code;
+}
+
+int writeRawR32(const char* filename, const float* heightmap, size_t sample_count)
+{
+    std::ofstream output(filename, std::ios::binary);
+    if (!output) {
+        return 1;
+    }
+
+    output.write(reinterpret_cast<const char*>(heightmap),
+                 static_cast<std::streamsize>(sample_count * sizeof(float)));
+    return output ? 0 : 1;
+}
+
+int readRawR32(const char* filename, std::vector<float>& heightmap, size_t expected_sample_count)
+{
+    std::ifstream input(filename, std::ios::binary);
+    if (!input) {
+        return 1;
+    }
+
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    if (size != static_cast<std::streamoff>(expected_sample_count * sizeof(float))) {
+        return 1;
+    }
+
+    heightmap.resize(expected_sample_count);
+    input.read(reinterpret_cast<char*>(heightmap.data()),
+               static_cast<std::streamsize>(expected_sample_count * sizeof(float)));
+    if (!input) {
+        heightmap.clear();
+        return 1;
     }
 
     return 0;
