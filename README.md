@@ -69,20 +69,27 @@ Arguments
 - `--tone-map MODE`: preview tone mapping mode: `linear`, `log`, or `asinh`
 - `--export-heightmap-f32`: export the final raw float32 heightmap and metadata
 - `--filename NAME`: deprecated and ignored for on-disk naming
-- `--cycles N`: number of simulation cycles
-- `--plates N`: number of tectonic plates
-- `--aggregation-overlap-abs N`: continent aggregation overlap threshold in pixels
-- `--aggregation-overlap-rel X`: continent aggregation overlap threshold as a ratio
-- `--folding-ratio X`: fraction of overlapping continental crust converted into uplift
-- `--erosion-period N`: updates between erosion passes
-- `--erosion-strength X`: erosion strength multiplier; `0` disables erosion
-- `--rotation-strength X`: angular plate motion multiplier
-- `--landmass-rotation X`: visible crust rotation multiplier; `0` disables it
-- `--subduction-strength X`: oceanic crust removal multiplier during subduction
+- `--cycles N`: number of simulation cycles; default `2`
+- `--plates N`: number of tectonic plates; default `10`
+- `--aggregation-overlap-abs N`: absolute collision coverage needed to aggregate continents; default `max(64, WIDTH*HEIGHT/1000)`, which is `240` at `600x400`
+- `--aggregation-overlap-rel X`: relative collision coverage needed to aggregate continents in `[0, 1]`; default `0.20`
+- `--folding-ratio X`: fraction of overlapping continental crust converted into uplift in `[0, 1]`; default `0.08`
+- `--erosion-period N`: simulation updates between erosion passes; default `60`
+- `--erosion-strength X`: erosion strength multiplier; `0` disables erosion; default `1.0`
+- `--rotation-strength X`: angular plate motion multiplier; default `1.0`
+- `--landmass-rotation X`: visible crust rotation multiplier; `0` disables it; default `0.20`
+- `--subduction-strength X`: oceanic crust removal strength in `[0, 1]`; `1.0` removes one full `OCEANIC_BASE` chunk per subduction event; default `1.0`
 - `--step X`: save one intermediate frame every `X` simulation steps to `img/frames/`
 - `--gif`: create a GIF in `img/gif/`; with `--step`, the GIF uses sampled frames, otherwise it uses every update
 - `--no-steps`: after GIF creation, delete the generated frame PNGs instead of keeping them
 - `--show-boundaries`: overlay convergent, divergent, and transform boundaries on preview PNGs, frames, and GIF frames
+
+Default Tuning
+==============
+
+- `2` cycles and `10` plates keep the default run active enough to form varied interactions without making the out-of-the-box run slow.
+- `0.08` folding, `0.20` relative aggregation, and the area-scaled absolute aggregation threshold make continents fuse after sustained contact instead of effectively disabling aggregation on larger maps.
+- `60`/`1.0` erosion, `1.0` angular rotation, `0.20` landmass rotation, and `1.0` subduction keep all major processes visible by default without one effect overwhelming the others.
 
 Code Quality
 ============

@@ -182,13 +182,13 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
       initial_hmap(width, height), imap(width, height), prev_imap(width, height),
       amap(width, height), plates(nullptr), plate_areas(_max_plates),
       plate_indices_found(_max_plates),
-      aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
-      erosion_period(_erosion_period), folding_ratio(_folding_ratio), iter_count(0),
+      aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(clamp_unit(aggr_ratio_rel)), cycle_count(0),
+      erosion_period(_erosion_period), folding_ratio(clamp_unit(_folding_ratio)), iter_count(0),
       max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
       erosion_strength(_erosion_strength < 0.0f ? 0.0f : _erosion_strength),
       crust_rotation_strength(_crust_rotation_strength < 0.0f ? 0.0f : _crust_rotation_strength),
       rotation_strength(_rotation_strength < 0.0f ? 0.0f : _rotation_strength),
-      subduction_strength(_subduction_strength < 0.0f ? 0.0f : _subduction_strength),
+      subduction_strength(clamp_unit(_subduction_strength)),
       sea_level_m(TopographyCodec::legacy_raw_sea_level_m()),
       initial_min_height_m(_initial_min_height_m),
       initial_max_height_m(_initial_max_height_m),
@@ -474,6 +474,7 @@ void lithosphere::createPlates() {
     try {
         const uint32_t map_area = _worldDimension.getArea();
         num_plates = max_plates;
+        _steps = 0;
 
         // Initialize "Free plate center position" lookup table.
         // This way two plate centers will never be identical.
@@ -1426,7 +1427,7 @@ void lithosphere::update() {
         for (uint32_t i = 0; i < num_plates; ++i) {
             plates[i]->resetSegments();
 
-            if (erosion_period > 0 && iter_count % erosion_period == 0)
+            if (erosion_period > 0 && _steps % erosion_period == 0)
                 plates[i]->erode(CONTINENTAL_BASE);
 
             plates[i]->move();

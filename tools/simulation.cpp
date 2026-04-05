@@ -6,6 +6,7 @@
 #include "platecapi.hpp"
 #include "sqrdmd.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -31,13 +32,14 @@ namespace {
 constexpr float kSeaLevel = 0.65f;
 constexpr uint32_t kErosionPeriod = 60;
 constexpr float kDefaultErosionStrength = 1.0f;
-constexpr float kFoldingRatio = 0.02f;
-constexpr uint32_t kAggrOverlapAbs = 1000000;
-constexpr float kAggrOverlapRel = 0.33f;
+constexpr float kFoldingRatio = 0.08f;
+constexpr uint32_t kMinAggregationOverlapAbs = 64;
+constexpr uint32_t kAggregationOverlapAreaDivisor = 1000;
+constexpr float kAggrOverlapRel = 0.20f;
 constexpr uint32_t kDefaultCycleCount = 2;
 constexpr uint32_t kDefaultPlateCount = 10;
 constexpr float kDefaultRotationStrength = 1.0f;
-constexpr float kDefaultLandmassRotation = 0.0f;
+constexpr float kDefaultLandmassRotation = 0.20f;
 constexpr float kDefaultSubductionStrength = 1.0f;
 constexpr uint16_t kDefaultMinInitialHeight = TopographyCodec::kDefaultInitialMinHeightMeters;
 constexpr uint16_t kDefaultMaxInitialHeight = TopographyCodec::kDefaultInitialMaxHeightMeters;
@@ -75,6 +77,7 @@ struct Params {
     uint32_t cycles;
     uint32_t plates;
     uint32_t aggregation_overlap_abs;
+    bool aggregation_overlap_abs_explicit;
     float aggregation_overlap_rel;
     uint32_t erosion_period;
     float folding_ratio;
@@ -202,6 +205,13 @@ float parse_unit_float(const char* flag, const char* value)
     return parsed;
 }
 
+uint32_t default_aggregation_overlap_abs(uint32_t width, uint32_t height)
+{
+    const uint64_t area = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+    const uint32_t scaled = static_cast<uint32_t>(area / kAggregationOverlapAreaDivisor);
+    return std::max(kMinAggregationOverlapAbs, scaled);
+}
+
 ToneMapMode parse_tone_map(const char* value)
 {
     if (strcmp(value, "linear") == 0) {
@@ -266,16 +276,28 @@ void print_help()
     printf(" --tone-map MODE     : preview tone map for frames/GIF: linear, log, asinh\n");
     printf(" --export-heightmap-f32: write the final raw float32 debug heightmap plus metadata\n");
     printf(" --filename NAME     : deprecated; saved filenames now use timestamp + seed/input name\n");
-    printf(" --cycles N          : number of simulation cycles to run\n");
-    printf(" --plates N          : number of tectonic plates to initialize\n");
+    printf(" --cycles N          : number of simulation cycles to run (default %u)\n",
+           kDefaultCycleCount);
+    printf(" --plates N          : number of tectonic plates to initialize (default %u)\n",
+           kDefaultPlateCount);
     printf(" --aggregation-overlap-abs N: overlap pixels needed to aggregate continents\n");
-    printf(" --aggregation-overlap-rel X: overlap ratio needed to aggregate continents\n");
-    printf(" --folding-ratio X   : fraction of overlapping continental crust turned into uplift\n");
-    printf(" --erosion-period N  : number of updates between erosion passes\n");
-    printf(" --erosion-strength X: scale erosion amount (0 disables)\n");
-    printf(" --rotation-strength X: scale angular plate motion\n");
-    printf(" --landmass-rotation X: scale visible crust rotation (0 disables)\n");
-    printf(" --subduction-strength X: scale oceanic crust removal during subduction\n");
+    printf("                       default max(%u, area/%u); %u at 600x400\n",
+           kMinAggregationOverlapAbs, kAggregationOverlapAreaDivisor,
+           default_aggregation_overlap_abs(600, 400));
+    printf(" --aggregation-overlap-rel X: overlap ratio needed to aggregate continents in [0, 1]\n");
+    printf("                       default %.2f\n", kAggrOverlapRel);
+    printf(" --folding-ratio X   : fraction of overlapping continental crust turned into uplift in [0, 1]\n");
+    printf("                       default %.2f\n", kFoldingRatio);
+    printf(" --erosion-period N  : number of simulation updates between erosion passes (default %u)\n",
+           kErosionPeriod);
+    printf(" --erosion-strength X: scale erosion amount (0 disables, default %.2f)\n",
+           kDefaultErosionStrength);
+    printf(" --rotation-strength X: scale angular plate motion (default %.2f)\n",
+           kDefaultRotationStrength);
+    printf(" --landmass-rotation X: scale visible crust rotation (0 disables, default %.2f)\n",
+           kDefaultLandmassRotation);
+    printf(" --subduction-strength X: scale oceanic crust removal during subduction in [0, 1]\n");
+    printf("                       default %.2f\n", kDefaultSubductionStrength);
     printf(" --step X            : save intermediate maps every X steps\n");
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
@@ -302,7 +324,8 @@ Params fill_params(int argc, char* argv[])
         false,
         kDefaultCycleCount,
         kDefaultPlateCount,
-        kAggrOverlapAbs,
+        default_aggregation_overlap_abs(600, 400),
+        false,
         kAggrOverlapRel,
         kErosionPeriod,
         kFoldingRatio,
@@ -421,6 +444,7 @@ Params fill_params(int argc, char* argv[])
             }
             params.aggregation_overlap_abs =
                 parse_nonnegative_u32("--aggregation-overlap-abs", argv[p + 1]);
+            params.aggregation_overlap_abs_explicit = true;
             p += 2;
         } else if (strcmp(argv[p], "--aggregation-overlap-rel") == 0) {
             if (p + 1 >= argc) {
@@ -433,7 +457,7 @@ Params fill_params(int argc, char* argv[])
             if (p + 1 >= argc) {
                 fail("a parameter should follow --folding-ratio");
             }
-            params.folding_ratio = parse_nonnegative_float("--folding-ratio", argv[p + 1]);
+            params.folding_ratio = parse_unit_float("--folding-ratio", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--erosion-period") == 0) {
             if (p + 1 >= argc) {
@@ -465,7 +489,7 @@ Params fill_params(int argc, char* argv[])
                 fail("a parameter should follow --subduction-strength");
             }
             params.subduction_strength =
-                parse_nonnegative_float("--subduction-strength", argv[p + 1]);
+                parse_unit_float("--subduction-strength", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--step") == 0) {
             if (p + 1 >= argc) {
@@ -1201,6 +1225,11 @@ int main(int argc, char* argv[])
             }
         }
 
+    }
+
+    if (!params.aggregation_overlap_abs_explicit) {
+        params.aggregation_overlap_abs =
+            default_aggregation_overlap_abs(params.width, params.height);
     }
 
     ensure_output_directories();

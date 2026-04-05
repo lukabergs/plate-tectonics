@@ -90,6 +90,16 @@ HeightmapStats compute_stats(const float* heightmap, size_t size) {
     return stats;
 }
 
+void run_steps(void* simulation, uint32_t steps) {
+    for (uint32_t step = 0; step < steps; ++step) {
+        platec_api_step(simulation);
+    }
+}
+
+bool heightmaps_equal(const float* lhs, const float* rhs, size_t size) {
+    return std::memcmp(lhs, rhs, sizeof(float) * size) == 0;
+}
+
 // Compare two stats with adaptive tolerance based on metric type
 bool stats_match(const HeightmapStats& actual, const HeightmapStats& expected,
                  float central_tolerance, float extrema_tolerance) {
@@ -294,6 +304,70 @@ TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
     EXPECT_TRUE(observed_regeneration);
 }
 
+TEST(Regression, ErosionPeriodStartsAfterConfiguredNumberOfUpdates) {
+    const uint32_t width = 128;
+    const uint32_t height = 64;
+    const size_t map_size = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    void* periodic = platec_api_create(12345, width, height, 0.65f, 4, 0.02f, 1000000, 0.33f, 2, 10);
+    void* delayed = platec_api_create(12345, width, height, 0.65f, 1000, 0.02f, 1000000, 0.33f, 2, 10);
+    ASSERT_NE(periodic, nullptr);
+    ASSERT_NE(delayed, nullptr);
+
+    run_steps(periodic, 3);
+    run_steps(delayed, 3);
+
+    EXPECT_TRUE(heightmaps_equal(platec_api_get_heightmap(periodic),
+                                 platec_api_get_heightmap(delayed), map_size));
+
+    run_steps(periodic, 1);
+    run_steps(delayed, 1);
+
+    EXPECT_FALSE(heightmaps_equal(platec_api_get_heightmap(periodic),
+                                  platec_api_get_heightmap(delayed), map_size));
+
+    platec_api_destroy(periodic);
+    platec_api_destroy(delayed);
+}
+
+TEST(Regression, FoldingAndSubductionStrengthsClampToUnitInterval) {
+    const uint32_t width = 128;
+    const uint32_t height = 64;
+    const size_t map_size = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    void* folded_unit = platec_api_create(12345, width, height, 0.65f, 60, 1.0f, 1000000, 0.33f, 2, 10);
+    void* folded_high = platec_api_create(12345, width, height, 0.65f, 60, 4.0f, 1000000, 0.33f, 2, 10);
+    ASSERT_NE(folded_unit, nullptr);
+    ASSERT_NE(folded_high, nullptr);
+
+    run_steps(folded_unit, 120);
+    run_steps(folded_high, 120);
+
+    EXPECT_TRUE(heightmaps_equal(platec_api_get_heightmap(folded_unit),
+                                 platec_api_get_heightmap(folded_high), map_size));
+
+    platec_api_destroy(folded_unit);
+    platec_api_destroy(folded_high);
+
+    void* subducted_unit =
+        platec_api_create(12345, width, height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10,
+                          1.0f, 0.0f, 1.0f, 1.0f);
+    void* subducted_high =
+        platec_api_create(12345, width, height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10,
+                          1.0f, 0.0f, 1.0f, 4.0f);
+    ASSERT_NE(subducted_unit, nullptr);
+    ASSERT_NE(subducted_high, nullptr);
+
+    run_steps(subducted_unit, 120);
+    run_steps(subducted_high, 120);
+
+    EXPECT_TRUE(heightmaps_equal(platec_api_get_heightmap(subducted_unit),
+                                 platec_api_get_heightmap(subducted_high), map_size));
+
+    platec_api_destroy(subducted_unit);
+    platec_api_destroy(subducted_high);
+}
+
 TEST(Regression, ProceduralInitialMetricRangeRespectsRequestedBounds) {
     const uint32_t width = 192;
     const uint32_t height = 96;
@@ -448,24 +522,24 @@ TEST(Regression, SimulationSeed12345_OutputConsistency) {
 
     // Keep both architecture baselines aligned until a fresh ARM64 capture is available.
     HeightmapStats expected_final_arm64 = {
-        0.0776743f,  // min
-        50.2339f,    // max
-        1.26174f,    // mean
-        0.224503f,   // median
-        2.50721f,    // std_dev
-        0.120296f,   // q25
-        1.34951f     // q75
+        0.00423117f,  // min
+        35.3689f,     // max
+        1.02073f,     // mean
+        0.167379f,    // median
+        2.08304f,     // std_dev
+        0.119812f,    // q25
+        1.15913f      // q75
     };
 
     // Baseline: Windows/Ubuntu x86-64 (MSVC/GCC, AVX2/SSE)
     HeightmapStats expected_final_x86 = {
-        0.0776743f,  // min
-        50.2339f,    // max
-        1.26174f,    // mean
-        0.224503f,   // median
-        2.50721f,    // std_dev
-        0.120296f,   // q25
-        1.34951f     // q75
+        0.00423117f,  // min
+        35.3689f,     // max
+        1.02073f,     // mean
+        0.167379f,    // median
+        2.08304f,     // std_dev
+        0.119812f,    // q25
+        1.15913f      // q75
     };
 
     // Check initial state (should match on all platforms)

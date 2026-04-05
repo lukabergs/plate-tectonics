@@ -27,7 +27,7 @@
 void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_level,
                         uint32_t erosion_period, float folding_ratio, uint32_t aggr_overlap_abs,
                         float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
-                        float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
+                        float erosion_strength = 1.0f, float crust_rotation_strength = 0.20f,
                         float rotation_strength = 1.0f, float subduction_strength = 1.0f,
                         int32_t sea_level_m = -1,
                         uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,

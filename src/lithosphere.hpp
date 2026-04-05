@@ -73,10 +73,10 @@ class lithosphere {
      *
      * @param map_side_length Square height map's side's length in pixels.
      * @param sea_level Amount of surface area that becomes oceanic crust.
-     * @param _erosion_period # of iterations between global erosion.
-     * @param _folding_ratio Percent of overlapping crust that's folded.
+     * @param _erosion_period # of simulation updates between global erosion passes.
+     * @param _folding_ratio Fraction [0, 1] of overlapping crust that's folded.
      * @param aggr_ratio_abs # of overlapping points causing aggregation.
-     * @param aggr_ratio_rel % of overlapping area causing aggregation.
+     * @param aggr_ratio_rel Collision coverage ratio [0, 1] causing aggregation.
      * @param num_cycles Number of times system will be restarted.
      * @exception	invalid_argument Exception is thrown if map side length
      *           	is not a power of two and greater than three.
@@ -84,7 +84,7 @@ class lithosphere {
     lithosphere(long seed, uint32_t width, uint32_t height, float sea_level,
                 uint32_t _erosion_period, float _folding_ratio, uint32_t aggr_ratio_abs,
                 float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
-                float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
+                float erosion_strength = 1.0f, float crust_rotation_strength = 0.20f,
                 float rotation_strength = 1.0f, float subduction_strength = 1.0f,
                 int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride,
                 uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
@@ -190,10 +190,10 @@ class lithosphere {
     vector<uint32_t> plate_indices_found; ///< Used in update loop to remove plates
 
     uint32_t aggr_overlap_abs; ///< # of overlapping pixels -> aggregation.
-    float aggr_overlap_rel;    ///< % of overlapping area -> aggregation.
+    float aggr_overlap_rel;    ///< Collision coverage ratio [0, 1] -> aggregation.
     uint32_t cycle_count;      ///< Number of times the system's been restarted.
-    uint32_t erosion_period;   ///< # of iterations between global erosion.
-    float folding_ratio;       ///< Percent of overlapping crust that's folded.
+    uint32_t erosion_period;   ///< # of simulation updates between erosion passes.
+    float folding_ratio;       ///< Fraction [0, 1] of overlapping crust that's folded.
     uint32_t iter_count;       ///< Iteration count. Used to timestamp new crust.
     uint32_t max_cycles;       ///< Max n:o of times the system'll be restarted.
     uint32_t max_plates;       ///< Number of plates in the initial setting.
@@ -201,7 +201,7 @@ class lithosphere {
     float erosion_strength;    ///< Scales terrain erosion.
     float crust_rotation_strength; ///< Scales visible raster rotation.
     float rotation_strength;   ///< Scales angular plate motion.
-    float subduction_strength; ///< Scales oceanic crust removed during subduction.
+    float subduction_strength; ///< Fraction [0, 1] of oceanic crust removed during subduction.
     uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
     uint16_t initial_min_height_m; ///< Lower bound for procedurally seeded metric topography.
     uint16_t initial_max_height_m; ///< Upper bound for procedurally seeded metric topography.
