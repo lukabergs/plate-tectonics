@@ -1,254 +1,109 @@
-Plate-tectonics
+Plate Tectonics
 ===============
 
-[![Build Status](https://github.com/Mindwerks/plate-tectonics/actions/workflows/push.yml/badge.svg)](https://github.com/Mindwerks/plate-tectonics/actions/workflows/push.yml)
+This fork is focused on the C++ library, the simulation tool, and the test suite. Python bindings are removed.
 
-This is a library to simulate plate tectonics.
-It is written in C++ and it has Python bindings (as part of this project), as well as Haskell bindings ([hplatec](http://github.com/ftomassetti/hplatec)).
+Layout
+======
 
-How can I use it?
-=================
+- `src/`: core library
+- `tools/`: `simulation.exe` and shared heightmap I/O code
+- `tests/`: GoogleTest suite
+- `img/in/`: timestamped initial-state exports and source input images
+- `img/out/`: timestamped final-state exports
+- `img/gif/`: generated GIFs
+- `img/frames/`: kept intermediate frames
+- `x64-Debug/`, `x64-Release/`: the only intended local build folders
 
-Being a library you want probably to use it inside some larger program. From example [WorldEngine](https://github.com/Mindwerks/worldengine) (a world generator) is based on plate-tectonics.
+Build
+=====
 
-You can also use the examples to just run the code of this library and generate a few maps. However the examples do not unleash the full power of this library. For running the examples check section _Running the examples (C++)_.
+Use x64 Native Tools PowerShell for Visual Studio 2026:
 
-How it looks like
-=================
-
-The library offers an API to generate heightmaps and some other data about the world resulting from the simulation. The example permits also to generate maps like this one:
-
-![](https://raw.githubusercontent.com/Mindwerks/plate-tectonics/master/screenshots/map_grayscale.png)
-
-![](https://raw.githubusercontent.com/Mindwerks/plate-tectonics/master/screenshots/map_colors.png)
-
-You can see a video of simulation based on an old version of this library: http://www.youtube.com/watch?v=bi4b45tMEPE#t=0
-
-How to build plate-tectonics (C++)
-==================================
-
-We use [CMake](http://www.cmake.org/). Install it and then run the folowing commands
-
-### Linux
-
-```
-mkdir -p build
-cd build
-cmake .. -G "Unix Makefiles"
-make
+```powershell
+cmake --preset x64-debug
+cmake --build --preset build-x64-debug
+ctest --preset test-x64-debug
 ```
 
-### Mac OS-X
+`x64-debug` intentionally uses `RelWithDebInfo`, not plain `Debug`, so runtime performance stays close to Release while PDB symbols remain available.
 
-```
-mkdir -p build
-cd build
-cmake ..
-make
-```
+The Windows presets expect vcpkg at `C:/dev/vcpkg` and use `vcpkg.json` for `libpng`.
 
-This should produce a library (libPlateTectonics.a) in the build directory.
+Manual commands are collected in `build_commands.txt`.
 
-### Windows
+Executables
+===========
 
-```
-mkdir build
-cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
-cmake --build .
-```
+- `simulation.exe`: the interactive/manual runner. It generates terrain, imports heightmaps, writes outputs, optionally saves frames, and optionally builds a GIF.
+- `PlateTectonicsTests.exe`: the automated test binary used by CTest. It runs assertions against library behavior and writes regression artifacts for verification. It is not the simulator UI/tool.
 
-This project uses `libpng` for tests and examples. With the vcpkg toolchain enabled, the root `vcpkg.json` manifest installs that dependency automatically.
+Output Rules
+============
 
-If you want to build also the examples run:
+Each run gets one id: `<YYMMDDHHMM>_<SEED-or-INPUTIMGNAME>`.
 
-```
-mkdir -p build
-cd build
-cmake .. -DWITH_EXAMPLES=ON
-make
-```
+- Initial state: `img/in/<id>.r16` and `img/in/<id>.png`
+- Final state: `img/out/<id>.r16` and `img/out/<id>.png`
+- GIF: `img/gif/<id>.gif`
+- Frames: `img/frames/<id>_<NUMOFFRAME>.png`
+- Raw metric exports also write sidecars next to `.r16`: `.r16.json`
+- `--export-heightmap-f32` writes `img/out/<id>.f32` and `.f32.json`
 
-Note: All builds are now done in the `build/` directory to keep the source tree clean. The build directory is excluded from version control via `.gitignore`.
+The `.r16` file is the canonical metric heightmap export. The `.png` file is the rendered preview image for the chosen display settings.
 
-To compile on other platforms please run:
-
-```
-cmake --help
-```
-
-Running the examples (C++)
-==========================
-
-To run also the examples you need to install the library libpng.
-
-From the root directory run:
-
-```bash
-mkdir -p build
-cd build
-cmake .. -DWITH_EXAMPLES=ON -DCMAKE_TOOLCHAIN_FILE=C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
-make
-cd examples
-./simulation --dim 600 400 --filename world
-```
-
-Metric heightmaps
-=================
-
-The example CLI now separates authoritative terrain data from preview rendering.
-
-- Metric terrain domain: `0..65535`
-- `0`: deepest seafloor sample
-- `65535`: highest terrain sample
-- `--sea-level-m`: coastline/crust-classification threshold in that metric domain
-- Default data exports: `<base>.r16`, `<base>.r16.json`, `<base>.png` (16-bit grayscale PNG)
-- Preview export: `<base>_preview.png`
-
-Example workflows:
-
-```bash
-# Procedural world with explicit metric sea level
-./simulation --dim 600 400 --sea-level-m 32000 --filename world
-
-# Import a metric PNG16 heightmap
-./simulation --input-png16 world.png
-
-# Import a raw metric .r16 heightmap
-./simulation --input-r16 world.r16
-```
-
-`.r16` files are little-endian `uint16_t`, row-major, one sample per pixel. Sidecar metadata lives in `<base>.r16.json` and stores width, height, `sea_level_m`, format, endianness, layout, and version.
-
-How to run tests (C++)
-======================
-
-GoogleTest is automatically fetched by CMake using FetchContent, so no manual installation is required.
-
-After building the library with CMake in the build directory:
-
-```bash
-cd build/test
-make
-./PlateTectonicsTests
-```
-
-Currently the test coverage is still poor (but improving!), tests are present only for new code and tiny portion of the old code that were refactored.
-
-## Python bindings
-
-Supported versions:
-* Python >= 3.9
-
-### Quick Start (Python)
-
-Install using pip:
-
-```bash
-pip install PyPlatec
-```
-
-### Usage (Python)
-
-The library is quite simple. `platec.create()` requires all 10 parameters and supports both positional and keyword arguments:
-
-```python    
-    import platec
-
-    # Using positional arguments
-    p = platec.create(3, 512, 512, 0.65, 60, 0.02, 1000000, 0.33, 2, 10)
-    
-    while platec.is_finished(p) == 0:
-        platec.step(p)
-    
-    hm = platec.get_heightmap(p)
-    platec.destroy(p)
-```
-
-The Python bindings also expose metric helpers on an existing simulation:
-
-```python
-platec.load_heightmap_u16(p, metric_samples, 32000)
-sea_level_m = platec.get_sea_level_m(p)
-```
-
-
-With keyword arguments for clarity:
-
-```python
-    import platec
-    
-    # Using keyword arguments (recommended for readability)
-    p = platec.create(
-        seed=3,
-        width=1000,
-        height=800,
-        sea_level=0.65,
-        erosion_period=60,
-        folding_ratio=0.02,
-        aggr_overlap_abs=1000000,
-        aggr_overlap_rel=0.33,
-        cycle_count=2,
-        num_plates=10
-    )
-    
-    while platec.is_finished(p) == 0:
-        platec.step(p)
-    
-    hm = platec.get_heightmap(p)
-    platec.destroy(p)
-```
-
-### Building from Source (Python)
-
-If you need to build from source instead of using pre-built wheels:
-
-```bash
-cd pybindings
-python setup.py build
-python setup.py install
-```
-
-For development:
-```bash
-pip install -e .
-```
-
-Code Quality and Linting
-=========================
-
-This project uses C++ linters to maintain code quality. See [LINTING.md](LINTING.md) for details.
-
-Quick start:
-```bash
-# Run all linters
-./run_linter.sh
-
-# Run specific linter
-./run_linter.sh clang-tidy
-./run_linter.sh cppcheck
-
-# Format code
-./run_astyle.sh
-```
-
-Plans for the future
-====================
-
-* Improve the quality of the code and add some tests
-* Support Google protocol buffer
-
-Projects using plate-tectonics
-==============================
-
-[WorldEngine](http://github.com/Mindwerks/worldengine), a world generator  
-[Widelands](https://www.widelands.org/maps/lost-islands/), a free, open source real-time strategy game  
-
-Original project
+Simulation Usage
 ================
 
-A fork of platec http://sourceforge.net/projects/platec/ .
-That project is part of a Bachelor of Engineering thesis in Metropolia University of Applied Sciences, Helsinki, Finland. The thesis is freely downloadable from http://urn.fi/URN:NBN:fi:amk-201204023993 .
+Example:
 
-Kudos to the original author: Lauri Viitanen!
+```powershell
+.\x64-Debug\bin\simulation.exe --dim 600 400 -s 12345 --gif --step 25
+```
 
+Arguments
+=========
+
+- `-h`, `--help`: show help
+- `-s SEED`: set the random seed
+- `-i FILE`, `--input FILE`: load a legacy normalized PNG from the given path or from `img/in/`
+- `--input-png16 FILE`: load a 16-bit grayscale metric PNG
+- `--input-r16 FILE`: load a little-endian metric `.r16` heightmap
+- `--dim WIDTH HEIGHT`: set dimensions when no input image is used
+- `--sea-level-m N`: set metric coastline threshold in `[0, 65535]`
+- `--colors`: render preview PNGs/frames in color
+- `--grayscale`: render preview PNGs/frames in grayscale
+- `--no-output-normalization`: disable first-frame normalization for preview rendering
+- `--min-initial-height X`: remap the initial minimum height to `X` during preview normalization
+- `--max-initial-height X`: remap the initial maximum height to `X` during preview normalization
+- `--display-min X`: lower bound of the preview display window
+- `--display-max X`: upper bound of the preview display window
+- `--tone-map MODE`: preview tone mapping mode: `linear`, `log`, or `asinh`
+- `--export-heightmap-f32`: export the final raw float32 heightmap and metadata
+- `--filename NAME`: deprecated and ignored for on-disk naming
+- `--cycles N`: number of simulation cycles
+- `--plates N`: number of tectonic plates
+- `--aggregation-overlap-abs N`: continent aggregation overlap threshold in pixels
+- `--aggregation-overlap-rel X`: continent aggregation overlap threshold as a ratio
+- `--folding-ratio X`: fraction of overlapping continental crust converted into uplift
+- `--erosion-period N`: updates between erosion passes
+- `--erosion-strength X`: erosion strength multiplier; `0` disables erosion
+- `--rotation-strength X`: angular plate motion multiplier
+- `--landmass-rotation X`: visible crust rotation multiplier; `0` disables it
+- `--subduction-strength X`: oceanic crust removal multiplier during subduction
+- `--step X`: save one intermediate frame every `X` simulation steps to `img/frames/`
+- `--gif`: create a GIF in `img/gif/`; with `--step`, the GIF uses sampled frames, otherwise it uses every update
+- `--no-steps`: after GIF creation, delete the generated frame PNGs instead of keeping them
+- `--show-boundaries`: overlay convergent, divergent, and transform boundaries on preview PNGs, frames, and GIF frames
+
+Testing
+=======
+
+```powershell
+ctest --preset test-x64-debug
+```
+
+Code Quality
+============
+
+`.clang-format` and `.clang-tidy` are kept. The old shell wrappers were removed because they were stale, Unix-only, and tied to the previous layout.

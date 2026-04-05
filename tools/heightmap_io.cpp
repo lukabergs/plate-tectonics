@@ -1,4 +1,4 @@
-#include "map_drawing.hpp"
+#include "heightmap_io.hpp"
 #include "utils.hpp"
 #include <cctype>
 #include <fstream>

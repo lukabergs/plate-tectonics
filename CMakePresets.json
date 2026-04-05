@@ -1,0 +1,73 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "PLATE_TECTONICS_BUILD_SIMULATION": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64-Debug",
+      "description": "Fast development build with symbols. Uses RelWithDebInfo on purpose.",
+      "inherits": [
+        "windows-base"
+      ],
+      "binaryDir": "${sourceDir}/x64-Debug"
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64-Release",
+      "description": "Release build.",
+      "inherits": [
+        "windows-base"
+      ],
+      "binaryDir": "${sourceDir}/x64-Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-x64-debug",
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "build-x64-release",
+      "configurePreset": "x64-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-x64-debug",
+      "configurePreset": "x64-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "test-x64-release",
+      "configurePreset": "x64-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

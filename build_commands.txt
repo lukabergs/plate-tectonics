@@ -1,0 +1,35 @@
+Run these from x64 Native Tools PowerShell for Visual Studio 2026.
+
+Clean generated folders
+Remove-Item -Recurse -Force .vs, out, build, x64-Debug, x64-Release -ErrorAction SilentlyContinue
+
+Configure x64-Debug
+cmake --preset x64-debug
+
+Build x64-Debug
+cmake --build --preset build-x64-debug
+
+Run tests
+ctest --preset test-x64-debug
+
+Run the simulation tool
+.\x64-Debug\bin\simulation.exe --dim 600 400 -s 12345
+
+Configure x64-Release
+cmake --preset x64-release
+
+Build x64-Release
+cmake --build --preset build-x64-release
+
+Format all C++ files
+clang-format -i (Get-ChildItem src, tools, tests -Include *.cpp,*.hpp -Recurse | Select-Object -ExpandProperty FullName)
+
+Run clang-tidy against the configured x64-Debug compile database
+clang-tidy tools\simulation.cpp -p x64-Debug --checks=-misc-include-cleaner
+
+Run cppcheck
+cppcheck --enable=warning,style,performance,portability --std=c++20 -Isrc src tools tests
+
+Notes
+- `x64-Debug` intentionally uses `RelWithDebInfo`, not `Debug`, to avoid the usual slow `/Od` build.
+- Visual Studio and command-line builds should use the same presets and the same two output folders.

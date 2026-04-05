@@ -31,7 +31,7 @@
 #include <cmath>
 #include <vector>
 #include <iostream>
-#include "map_drawing.hpp"
+#include "heightmap_io.hpp"
 #include "sqrdmd.hpp"
 
 ///

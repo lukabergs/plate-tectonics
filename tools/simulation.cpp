@@ -2,11 +2,12 @@
 #define NOMINMAX
 #endif
 
-#include "map_drawing.hpp"
+#include "heightmap_io.hpp"
 #include "platecapi.hpp"
 #include "sqrdmd.hpp"
 
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,8 @@ constexpr uint16_t kGifDelayCs = 8;
 const fs::path kRepoRoot(PLATE_TECTONICS_ROOT);
 const fs::path kDefaultInputDir = kRepoRoot / "img" / "in";
 const fs::path kDefaultOutputDir = kRepoRoot / "img" / "out";
+const fs::path kDefaultGifDir = kRepoRoot / "img" / "gif";
+const fs::path kDefaultFramesDir = kRepoRoot / "img" / "frames";
 
 enum class ToneMapMode {
     Linear,
@@ -88,6 +91,7 @@ struct Params {
     bool custom_dimensions;
     bool has_sea_level_m;
     uint16_t sea_level_m;
+    bool legacy_filename_override;
     InputMode input_mode;
     std::string filename;
     std::string input_path;
@@ -259,7 +263,7 @@ void print_help()
     printf(" --display-max X     : upper bound of the preview display window\n");
     printf(" --tone-map MODE     : preview tone map: linear, log, asinh\n");
     printf(" --export-heightmap-f32: write the final raw float32 debug heightmap plus metadata\n");
-    printf(" --filename NAME     : output basename when no input image is used\n");
+    printf(" --filename NAME     : deprecated; saved filenames now use timestamp + seed/input name\n");
     printf(" --cycles N          : number of simulation cycles to run\n");
     printf(" --plates N          : number of tectonic plates to initialize\n");
     printf(" --aggregation-overlap-abs N: overlap pixels needed to aggregate continents\n");
@@ -274,7 +278,10 @@ void print_help()
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
     printf(" --show-boundaries   : overlay convergent/divergent/transform boundaries\n");
-    printf(" output files        : <base>.r16, <base>.r16.json, <base>.png (PNG16 data), <base>_preview.png\n");
+    printf(" output files        : img/in/<YYMMDDHHMM>_<seed-or-input>.r16 and .png\n");
+    printf("                       img/out/<YYMMDDHHMM>_<seed-or-input>.r16 and .png\n");
+    printf("                       img/gif/<YYMMDDHHMM>_<seed-or-input>.gif when --gif is used\n");
+    printf("                       img/frames/<YYMMDDHHMM>_<seed-or-input>_<frame>.png for kept frames\n");
 }
 
 Params fill_params(int argc, char* argv[])
@@ -310,6 +317,7 @@ Params fill_params(int argc, char* argv[])
         false,
         false,
         0,
+        false,
         InputMode::Procedural,
         "simulation",
         ""
@@ -390,6 +398,7 @@ Params fill_params(int argc, char* argv[])
             if (p + 1 >= argc) {
                 fail("a parameter should follow --filename");
             }
+            params.legacy_filename_override = true;
             params.filename = argv[p + 1];
             p += 2;
         } else if (strcmp(argv[p], "--cycles") == 0) {
@@ -565,53 +574,64 @@ fs::path resolve_input_path(const std::string& input_path, const char* default_e
     fail("input image not found: " + input_path);
 }
 
-uint32_t next_run_index(const fs::path& output_dir, const std::string& stem)
+void ensure_output_directories()
 {
-    uint32_t next_index = 0;
-    const std::string prefix = stem + "_";
-
-    if (!fs::exists(output_dir)) {
-        return next_index;
-    }
-
-    for (const fs::directory_entry& entry : fs::directory_iterator(output_dir)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".png") {
-            continue;
-        }
-
-        const std::string name = entry.path().stem().string();
-        if (name.rfind(prefix, 0) != 0) {
-            continue;
-        }
-
-        const std::string suffix = name.substr(prefix.size());
-        if (suffix.empty()) {
-            continue;
-        }
-
-        char* end = nullptr;
-        const unsigned long parsed = strtoul(suffix.c_str(), &end, 10);
-        if (*end == '\0' &&
-            parsed <= static_cast<unsigned long>(std::numeric_limits<uint32_t>::max()) &&
-            parsed >= next_index) {
-            next_index = static_cast<uint32_t>(parsed) + 1;
-        }
-    }
-
-    return next_index;
+    fs::create_directories(kDefaultInputDir);
+    fs::create_directories(kDefaultOutputDir);
+    fs::create_directories(kDefaultGifDir);
+    fs::create_directories(kDefaultFramesDir);
 }
 
-std::string step_file_name(const std::string& stem, uint32_t run_index, uint32_t step)
+std::string sanitize_file_component(const std::string& value)
 {
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%s_%u_step_%u.png", stem.c_str(), run_index, step);
+    std::string sanitized;
+    sanitized.reserve(value.size());
+
+    for (char ch : value) {
+        const unsigned char byte = static_cast<unsigned char>(ch);
+        if (std::isalnum(byte) != 0 || ch == '-' || ch == '_') {
+            sanitized += ch;
+        } else if (sanitized.empty() || sanitized.back() != '_') {
+            sanitized += '_';
+        }
+    }
+
+    while (!sanitized.empty() && sanitized.back() == '_') {
+        sanitized.pop_back();
+    }
+
+    return sanitized.empty() ? "run" : sanitized;
+}
+
+std::string make_run_timestamp(std::time_t now)
+{
+    std::tm local_tm = {};
+#ifdef _WIN32
+    localtime_s(&local_tm, &now);
+#else
+    localtime_r(&now, &local_tm);
+#endif
+
+    char buffer[16];
+    if (std::strftime(buffer, sizeof(buffer), "%y%m%d%H%M", &local_tm) == 0) {
+        fail("failed to format run timestamp");
+    }
     return buffer;
 }
 
-std::string frame_file_name(const std::string& stem, uint32_t run_index, uint32_t frame_index)
+std::string make_run_id(const Params& params, const fs::path& resolved_input_path,
+                        std::time_t started_at)
+{
+    const std::string label = resolved_input_path.empty()
+        ? std::to_string(params.seed)
+        : resolved_input_path.stem().string();
+    return make_run_timestamp(started_at) + "_" + sanitize_file_component(label);
+}
+
+std::string frame_file_name(const std::string& run_id, uint32_t frame_index)
 {
     char buffer[128];
-    snprintf(buffer, sizeof(buffer), "%s_%u_frame_%05u.png", stem.c_str(), run_index, frame_index);
+    snprintf(buffer, sizeof(buffer), "%s_%05u.png", run_id.c_str(), frame_index);
     return buffer;
 }
 
@@ -759,18 +779,13 @@ std::vector<uint16_t> encode_metric_heightmap(const float* heightmap, int width,
 }
 
 void export_metric_heightmap(const float* heightmap, int width, int height, uint16_t sea_level_m,
-                             const fs::path& raw_path, const fs::path& png16_path)
+                             const fs::path& raw_path)
 {
     const std::vector<uint16_t> metric_heightmap =
         encode_metric_heightmap(heightmap, width, height, sea_level_m);
 
     if (writeRawR16(raw_path.string().c_str(), metric_heightmap.data(), metric_heightmap.size()) != 0) {
         fail("failed to write metric heightmap: " + display_path(raw_path));
-    }
-
-    if (writeImageGray16(png16_path.string().c_str(), width, height, metric_heightmap.data(),
-                         "Plate Tectonics Metric Heightmap") != 0) {
-        fail("failed to write metric PNG16: " + display_path(png16_path));
     }
 
     TopographyCodec::Metadata raw_metadata;
@@ -781,13 +796,6 @@ void export_metric_heightmap(const float* heightmap, int width, int height, uint
     raw_metadata.endianness = TopographyCodec::kLittleEndian;
     if (writeTopographyMetadataJson(metadata_sidecar_path(raw_path).string().c_str(), raw_metadata) != 0) {
         fail("failed to write metric metadata: " + display_path(metadata_sidecar_path(raw_path)));
-    }
-
-    TopographyCodec::Metadata png_metadata = raw_metadata;
-    png_metadata.format = TopographyCodec::kMetricFormatPng16;
-    png_metadata.endianness = TopographyCodec::kBigEndian;
-    if (writeTopographyMetadataJson(metadata_sidecar_path(png16_path).string().c_str(), png_metadata) != 0) {
-        fail("failed to write PNG16 metadata: " + display_path(metadata_sidecar_path(png16_path)));
     }
 }
 
@@ -1110,18 +1118,19 @@ int main(int argc, char* argv[])
     TopographyCodec::Metadata input_metadata;
     bool has_input_metadata = false;
     fs::path resolved_input_path;
-    fs::path preview_output_path;
+    fs::path initial_png_output_path;
+    fs::path final_png_output_path;
     fs::path gif_output_path;
     fs::path debug_output_path;
-    fs::path data_r16_output_path;
-    fs::path data_png16_output_path;
-    std::string preview_label;
+    fs::path initial_r16_output_path;
+    fs::path final_r16_output_path;
+    std::string initial_png_label;
+    std::string final_png_label;
     std::string gif_label;
     std::string debug_label;
-    std::string data_r16_label;
-    std::string data_png16_label;
-    std::string run_stem;
-    uint32_t run_index = 0;
+    std::string initial_r16_label;
+    std::string final_r16_label;
+    std::string run_id;
 
     if (params.input_mode != InputMode::Procedural) {
         const char* default_extension =
@@ -1170,32 +1179,28 @@ int main(int argc, char* argv[])
             }
         }
 
-        fs::create_directories(kDefaultOutputDir);
-        run_stem = resolved_input_path.stem().string();
-        run_index = next_run_index(kDefaultOutputDir, run_stem);
-        preview_output_path =
-            kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + "_preview.png");
-        gif_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".gif");
-        debug_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".f32");
-        data_r16_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".r16");
-        data_png16_output_path = kDefaultOutputDir / (run_stem + "_" + std::to_string(run_index) + ".png");
-        preview_label = display_path(preview_output_path);
-        gif_label = display_path(gif_output_path);
-        debug_label = display_path(debug_output_path);
-        data_r16_label = display_path(data_r16_output_path);
-        data_png16_label = display_path(data_png16_output_path);
-    } else {
-        run_stem = params.filename;
-        preview_output_path = params.filename + "_preview.png";
-        gif_output_path = params.filename + ".gif";
-        debug_output_path = params.filename + ".f32";
-        data_r16_output_path = params.filename + ".r16";
-        data_png16_output_path = params.filename + ".png";
-        preview_label = display_path(preview_output_path);
-        gif_label = display_path(gif_output_path);
-        debug_label = display_path(debug_output_path);
-        data_r16_label = display_path(data_r16_output_path);
-        data_png16_label = display_path(data_png16_output_path);
+    }
+
+    ensure_output_directories();
+    const std::time_t started_at = std::time(nullptr);
+    run_id = make_run_id(params, resolved_input_path, started_at);
+    initial_png_output_path = kDefaultInputDir / (run_id + ".png");
+    final_png_output_path = kDefaultOutputDir / (run_id + ".png");
+    gif_output_path = kDefaultGifDir / (run_id + ".gif");
+    debug_output_path = kDefaultOutputDir / (run_id + ".f32");
+    initial_r16_output_path = kDefaultInputDir / (run_id + ".r16");
+    final_r16_output_path = kDefaultOutputDir / (run_id + ".r16");
+    initial_png_label = display_path(initial_png_output_path);
+    final_png_label = display_path(final_png_output_path);
+    gif_label = display_path(gif_output_path);
+    debug_label = display_path(debug_output_path);
+    initial_r16_label = display_path(initial_r16_output_path);
+    final_r16_label = display_path(final_r16_output_path);
+
+    if (params.legacy_filename_override) {
+        fprintf(stderr,
+                "warning: --filename is ignored for output naming; using %s instead\n",
+                run_id.c_str());
     }
 
     const int32_t sea_level_override_m =
@@ -1263,9 +1268,10 @@ int main(int argc, char* argv[])
     if (!resolved_input_path.empty()) {
         printf(" input    : %s\n", display_path(resolved_input_path).c_str());
     }
-    printf(" preview  : %s\n", preview_label.c_str());
-    printf(" data r16 : %s\n", data_r16_label.c_str());
-    printf(" data png : %s\n", data_png16_label.c_str());
+    printf(" init r16 : %s\n", initial_r16_label.c_str());
+    printf(" init png : %s\n", initial_png_label.c_str());
+    printf(" final r16: %s\n", final_r16_label.c_str());
+    printf(" final png: %s\n", final_png_label.c_str());
     if (params.export_heightmap_f32) {
         printf(" debug f32: %s\n", debug_label.c_str());
     }
@@ -1281,6 +1287,9 @@ int main(int argc, char* argv[])
     } else {
         printf(" step     : %u\n", params.step);
     }
+    if (params.step != 0 || params.make_gif) {
+        printf(" frames   : %s\n", display_path(kDefaultFramesDir).c_str());
+    }
     printf("\n");
 
     normalization_range =
@@ -1294,15 +1303,28 @@ int main(int argc, char* argv[])
                                  static_cast<int>(params.height), last_boundary_state);
     }
 
-    if (params.make_gif && params.step == 0) {
-        const fs::path frame_path =
-            (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
-            frame_file_name(run_stem, run_index, 0);
+    export_metric_heightmap(platec_api_get_heightmap(simulation), static_cast<int>(params.width),
+                            static_cast<int>(params.height), active_sea_level_m,
+                            initial_r16_output_path);
+    save_image(simulation, initial_png_output_path, static_cast<int>(params.width),
+               static_cast<int>(params.height), params.colors, normalization_range,
+               params.display_min, params.display_max, params.tone_map,
+               params.show_boundaries,
+               &last_boundary_state);
+
+    uint32_t saved_frame_count = 0;
+    const auto save_frame = [&](const BoundaryOverlayData* fallback_boundaries) {
+        const fs::path frame_path = kDefaultFramesDir / frame_file_name(run_id, saved_frame_count);
         save_image(simulation, frame_path, static_cast<int>(params.width),
                    static_cast<int>(params.height), params.colors, normalization_range,
                    params.display_min, params.display_max, params.tone_map,
-                   params.show_boundaries,
-                   &last_boundary_state);
+                   params.show_boundaries, fallback_boundaries);
+        ++saved_frame_count;
+        return frame_path;
+    };
+
+    if (params.make_gif && params.step == 0) {
+        const fs::path frame_path = save_frame(&last_boundary_state);
         gif_frames.push_back(frame_path);
         gif_temp_files.push_back(frame_path);
     }
@@ -1314,32 +1336,19 @@ int main(int argc, char* argv[])
         platec_api_step(simulation);
 
         if (params.make_gif && params.step == 0) {
-            const fs::path frame_path =
-                (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
-                frame_file_name(run_stem, run_index, step);
-            save_image(simulation, frame_path, static_cast<int>(params.width),
-                       static_cast<int>(params.height), params.colors, normalization_range,
-                       params.display_min, params.display_max, params.tone_map,
-                       params.show_boundaries,
-                       &boundary_before_step);
+            const fs::path frame_path = save_frame(&boundary_before_step);
             gif_frames.push_back(frame_path);
             gif_temp_files.push_back(frame_path);
         }
 
         if (params.step != 0 && step % params.step == 0) {
-            const fs::path step_output_path =
-                (!resolved_input_path.empty() ? kDefaultOutputDir : fs::path(".")) /
-                step_file_name(run_stem, run_index, step);
-            save_image(simulation, step_output_path, static_cast<int>(params.width),
-                       static_cast<int>(params.height), params.colors, normalization_range,
-                       params.display_min, params.display_max, params.tone_map,
-                       params.show_boundaries,
-                       &boundary_before_step);
+            const fs::path step_output_path = save_frame(&boundary_before_step);
             step_outputs.push_back(step_output_path);
             if (params.make_gif) {
                 gif_frames.push_back(step_output_path);
             }
-            printf(" * step %u (filename %s)\n", step, display_path(step_output_path).c_str());
+            printf(" * frame %u (step %u, filename %s)\n",
+                   saved_frame_count - 1, step, display_path(step_output_path).c_str());
         }
 
         if (params.show_boundaries) {
@@ -1348,7 +1357,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    save_image(simulation, preview_output_path, static_cast<int>(params.width),
+    save_image(simulation, final_png_output_path, static_cast<int>(params.width),
                static_cast<int>(params.height), params.colors, normalization_range,
                params.display_min, params.display_max, params.tone_map,
                params.show_boundaries,
@@ -1356,7 +1365,7 @@ int main(int argc, char* argv[])
 
     export_metric_heightmap(platec_api_get_heightmap(simulation), static_cast<int>(params.width),
                             static_cast<int>(params.height), active_sea_level_m,
-                            data_r16_output_path, data_png16_output_path);
+                            final_r16_output_path);
 
     if (params.export_heightmap_f32) {
         export_heightmap_f32(platec_api_get_heightmap(simulation), debug_output_path,
@@ -1365,7 +1374,7 @@ int main(int argc, char* argv[])
 
     if (params.make_gif) {
         if (params.step != 0 && (gif_frames.empty() || step % params.step != 0)) {
-            gif_frames.push_back(preview_output_path);
+            gif_frames.push_back(final_png_output_path);
         }
         create_gif(gif_output_path, gif_frames);
         if (params.delete_gif_frames) {
@@ -1377,9 +1386,10 @@ int main(int argc, char* argv[])
         }
     }
 
-    printf(" * preview exported (filename %s)\n", preview_label.c_str());
-    printf(" * metric heightmap exported (filename %s)\n", data_r16_label.c_str());
-    printf(" * metric PNG16 exported (filename %s)\n", data_png16_label.c_str());
+    printf(" * initial metric heightmap exported (filename %s)\n", initial_r16_label.c_str());
+    printf(" * initial preview exported (filename %s)\n", initial_png_label.c_str());
+    printf(" * final metric heightmap exported (filename %s)\n", final_r16_label.c_str());
+    printf(" * final preview exported (filename %s)\n", final_png_label.c_str());
     if (params.export_heightmap_f32) {
         printf(" * debug float32 exported (filename %s)\n", debug_label.c_str());
     }

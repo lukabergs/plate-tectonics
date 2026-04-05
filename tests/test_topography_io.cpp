@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "map_drawing.hpp"
+#include "heightmap_io.hpp"
 
 #include <filesystem>
 #include <vector>

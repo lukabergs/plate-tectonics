@@ -1,85 +1,43 @@
-*.png
-*.gif
 .DS_Store
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-.idea
-
-# Build directory (contains all CMake generated files)
-build/
-
-# Image directory
-img/
-
-# VS directory
+.idea/
 .vs/
+out/
+build/
+x64-Debug/
+x64-Release/
+img/
+venv/
+__pycache__/
 
-*.swp
-venv
-
-*.py[cod]
-
-# C extensions
-*.so
-
-# Packages
+*.a
+*.app
+*.dll
+*.dylib
 *.egg
 *.egg-info
-dist
-build
-eggs
-parts
-bin
-var
-sdist
-develop-eggs
-.installed.cfg
-lib
-lib64
-__pycache__
+*.exe
+*.gif
+*.gch
+*.lai
+*.la
+*.lib
+*.lo
+*.mod
+*.o
+*.obj
+*.out
+*.png
+*.py[cod]
+*.pch
+*.slo
+*.so
+*.swp
 
-# Installer logs
-pip-log.txt
-
-# Unit test / coverage reports
 .coverage
-.tox
-nosetests.xml
-
-# Translations
-*.mo
-
-# Mr Developer
-.mr.developer.cfg
-.project
-.pydevproject
-
+.tox/
 MANIFEST
+dist/
+eggs/
+parts/
+sdist/
+var/

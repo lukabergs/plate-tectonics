@@ -1,5 +1,5 @@
-#ifndef MAP_DRAWING
-#define MAP_DRAWING
+#ifndef HEIGHTMAP_IO_HPP
+#define HEIGHTMAP_IO_HPP
 
 #include <stdio.h>
 #include <cstdlib>

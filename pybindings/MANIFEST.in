@@ -1,5 +1,0 @@
-include README.md
-include ../LICENSE
-recursive-include cpp_src *.hpp *.cpp *.h
-recursive-include platec_src *.hpp *.cpp *.h
-global-exclude *.pyc __pycache__ *.so *.o

@@ -1,255 +1,70 @@
-name: Workflow
+name: C++
+
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   pull_request:
     branches:
       - main
 
 jobs:
-  build:
-    name: "Build for Python ${{ matrix.python }} on ${{ matrix.os }}"
+  build-and-test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies (Linux)
+      - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
-          sudo apt install build-essential libssl-dev zlib1g-dev \
-            libbz2-dev libreadline-dev libsqlite3-dev curl git \
-            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
-            libffi-dev liblzma-dev
+          sudo apt install -y cmake libpng-dev
 
-      - name: Install dependencies (MacOS)
+      - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install cmake
+          brew install cmake libpng
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-          choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-          vcpkg install zlib:x64-windows libpng:x64-windows
-          vcpkg integrate install
+          vcpkg install libpng:x64-windows
 
-      - name: Configure CMake (Linux/MacOS)
+      - name: Configure (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          mkdir -p build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          make -j2
+          cmake -S . -B build -DPLATE_TECTONICS_BUILD_SIMULATION=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
-      - name: Configure CMake (Windows)
+      - name: Configure (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          mkdir build
-          cd build
-          # CRITICAL: -DMSVC_RUNTIME=dynamic is required to match vcpkg's runtime library
-          # Without this, we get STATUS_STACK_BUFFER_OVERRUN crashes in libpng due to
-          # runtime library mismatch between /MT (static) and /MD (dynamic).
-          # See CMakeLists.txt for detailed explanation.
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DMSVC_RUNTIME=dynamic
-          cmake --build . --config RelWithDebInfo
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DPLATE_TECTONICS_BUILD_SIMULATION=ON -DBUILD_TESTING=ON
 
-      - name: Install ProcDump for crash dumps (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # Download and extract ProcDump
-          Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Procdump.zip" -OutFile procdump.zip
-          Expand-Archive -Path procdump.zip -DestinationPath procdump
-          # Create crash dump directory in runner.temp (where GitHub expects artifacts)
-          $dumpDir = Join-Path $env:RUNNER_TEMP "CrashDumps"
-          New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
-          Write-Host "ProcDump installed. Crash dumps will be saved to: $dumpDir"
-
-      - name: Run tests (Windows)
-        if: matrix.os == 'windows-latest'
-        continue-on-error: true
-        run: |
-          cd build
-          # Run test under ProcDump to capture crash dumps
-          # -ma = full dump, -x = launch and monitor, -e = dump on exception, -accepteula = accept license
-          $dumpDir = Join-Path $env:RUNNER_TEMP "CrashDumps"
-          ..\procdump\procdump.exe -accepteula -ma -e -x $dumpDir test\RelWithDebInfo\PlateTectonicsTests.exe
-          Write-Host "Test execution completed (exit code: $LASTEXITCODE)"
-
-      - name: Configure core dumps (Linux/MacOS)
+      - name: Build (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: |
-          # Enable core dumps
-          ulimit -c unlimited
-          # Set core dump pattern
-          if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            echo "Core dumps will be saved to: /tmp/cores"
-            sudo mkdir -p /tmp/cores
-            sudo chmod 777 /tmp/cores
-            echo "/tmp/cores/core.%e.%p" | sudo tee /proc/sys/kernel/core_pattern
-          else
-            echo "Core dumps enabled (macOS default location)"
-          fi
+        run: cmake --build build --parallel
 
-      - name: Run tests (Linux/MacOS)
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Test (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: |
-          cd build
-          export ASAN_OPTIONS="halt_on_error=0:detect_leaks=1:symbolize=1"
-          ctest -C RelWithDebInfo --verbose --output-on-failure
+        run: ctest --test-dir build --output-on-failure
 
-      - name: Upload Windows crash dumps
-        if: always() && matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-dumps-windows-${{ matrix.python }}
-          path: |
-            ${{ runner.temp }}/CrashDumps/*.dmp
-          if-no-files-found: ignore
+      - name: Test (Windows)
+        if: matrix.os == 'windows-latest'
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
-      - name: Upload Linux core dumps
-        if: always() && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-dumps-linux-${{ matrix.python }}
-          path: |
-            /tmp/cores/core.*
-          if-no-files-found: ignore
-
-      - name: Upload macOS core dumps
-        if: always() && matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-dumps-macos-${{ matrix.python }}
-          path: |
-            /cores/core.*
-          if-no-files-found: ignore
-
-      - name: Upload regression test PNG artifacts
+      - name: Upload regression PNGs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: regression-pngs-${{ matrix.os }}-${{ matrix.python }}
-          path: |
-            build/regression_*.png
+          name: regression-pngs-${{ matrix.os }}
+          path: build/regression_*.png
           if-no-files-found: ignore
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Build Python bindings (Linux - use cibuildwheel)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          pip install cibuildwheel
-          # Convert version like "3.10" to "310" for cibuildwheel
-          PYVER=$(echo "${{ matrix.python }}" | tr -d '.')
-          export CIBW_BUILD="cp${PYVER}-*"
-          export CIBW_SKIP="*-musllinux_*"
-          export CIBW_ARCHS_LINUX="x86_64"
-          # Run from root so setup.py can access ../src directory
-          cibuildwheel pybindings --platform linux --output-dir pybindings/dist
-
-      - name: Build Python bindings (macOS/Windows - regular build)
-        if: matrix.os != 'ubuntu-latest'
-        run: |
-          pip install -U pip build
-          cd pybindings
-          python -m build
-
-      - name: Run Python tests (all platforms)
-        run: |
-          pip install -U pip setuptools wheel
-          cd pybindings
-          python setup.py build_ext --inplace
-          python -m unittest discover -s test -p "test_*.py" -v
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-build-${{ matrix.os }}-${{ matrix.python }}
-          path: pybindings/dist/
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-${{ matrix.os }}-${{ matrix.python }}
-          path: |
-            test/*.log
-            build/*.log
-
-  collect-artifacts:
-    name: "Collect All Artifacts"
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-artifacts/
-
-      - name: Package Python builds
-        run: |
-          mkdir -p final-builds
-          find all-artifacts/python-build-* -type f -exec mv {} final-builds/ \;
-          ls -lah final-builds/
-
-      - name: Package regression PNG images
-        run: |
-          mkdir -p regression-pngs
-          # Copy PNGs from each platform artifact and rename to include platform info
-          for artifact_dir in all-artifacts/regression-pngs-*; do
-            if [ -d "$artifact_dir" ]; then
-              # Extract platform and python version from directory name
-              # Format: regression-pngs-<os>-<python>
-              artifact_name=$(basename "$artifact_dir")
-              # Extract everything after "regression-pngs-"
-              platform_info="${artifact_name#regression-pngs-}"
-              echo "Processing $artifact_name (platform: $platform_info)"
-
-              # Copy each PNG file with platform prefix
-              for png in "$artifact_dir"/*.png; do
-                if [ -f "$png" ]; then
-                  filename=$(basename "$png")
-                  # Add platform prefix to filename
-                  new_name="${platform_info}_${filename}"
-                  cp "$png" "regression-pngs/$new_name"
-                  echo "  Copied: $filename -> $new_name"
-                fi
-              done
-            fi
-          done
-
-          echo "Final PNG collection:"
-          ls -lah regression-pngs/
-
-      - name: Upload final artifact package
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-python-builds
-          path: final-builds/
-
-      - name: Upload regression PNG comparison package
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: regression-png-comparison
-          path: regression-pngs/
-
-      - name: Upload to GitHub Releases (on tag push)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: final-builds/*
