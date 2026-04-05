@@ -138,6 +138,8 @@ class lithosphere {
     void resetSimulationState();
     void initializeHeightMapFromMetric(const uint16_t* heightmap_m, uint16_t sea_level_m);
     void seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override);
+    void jaggedizePlateBoundaries();
+    void rebuildPlateAreasFromOwnership();
     void regenerateCrust();
     void updateCollisions();
     void clearPlates();
@@ -176,10 +178,13 @@ class lithosphere {
     void restart(); //< Replace plates with a new population.
     WorldPoint randomPosition();
 
-    HeightMap hmap;     ///< Height map representing the topography of system.
-    IndexMap imap;      ///< Plate index map of the "owner" of each map point.
-    IndexMap prev_imap; ///< Plate index map from the last update
-    AgeMap amap;        ///< Age map of the system's surface (topography).
+    HeightMap hmap;              ///< Physical topography used by the simulation.
+    HeightMap display_hmap;      ///< Visual/export topography exposed via the public API.
+    HeightMap prev_display_hmap; ///< Previous frame's visual/export topography.
+    HeightMap initial_hmap;      ///< Initial topography before plates begin moving.
+    IndexMap imap;          ///< Plate index map of the "owner" of each map point.
+    IndexMap prev_imap;     ///< Plate index map from the last update
+    AgeMap amap;            ///< Age map of the system's surface (topography).
     plate** plates;     ///< Array of plates that constitute the system.
     vector<plateArea> plate_areas;
     vector<uint32_t> plate_indices_found; ///< Used in update loop to remove plates

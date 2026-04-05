@@ -681,35 +681,17 @@ void plate::rotateCrust(float angle) {
             const float dy = static_cast<float>(y) - center_y;
             const float rotated_x = dx * c - dy * s + center_x;
             const float rotated_y = dx * s + dy * c + center_y;
-            const int x0 = static_cast<int>(floorf(rotated_x));
-            const int y0 = static_cast<int>(floorf(rotated_y));
-            const float frac_x = rotated_x - static_cast<float>(x0);
-            const float frac_y = rotated_y - static_cast<float>(y0);
-
-            for (int oy = 0; oy <= 1; ++oy) {
-                for (int ox = 0; ox <= 1; ++ox) {
-                    const int tx = x0 + ox;
-                    const int ty = y0 + oy;
-                    if (tx < 0 || ty < 0 || tx >= static_cast<int>(width) ||
-                        ty >= static_cast<int>(height)) {
-                        continue;
-                    }
-
-                    const float wx = ox == 0 ? 1.0f - frac_x : frac_x;
-                    const float wy = oy == 0 ? 1.0f - frac_y : frac_y;
-                    const float weight = wx * wy;
-                    if (weight <= 0.0f) {
-                        continue;
-                    }
-
-                    const uint32_t dest_index =
-                        static_cast<uint32_t>(ty) * width + static_cast<uint32_t>(tx);
-                    const float contributed_crust = crust * weight;
-                    rotated[dest_index] += contributed_crust;
-                    age_accumulator[dest_index] +=
-                        contributed_crust * static_cast<float>(age_map[index]);
-                }
+            const int tx = static_cast<int>(std::lround(rotated_x));
+            const int ty = static_cast<int>(std::lround(rotated_y));
+            if (tx < 0 || ty < 0 || tx >= static_cast<int>(width) ||
+                ty >= static_cast<int>(height)) {
+                continue;
             }
+
+            const uint32_t dest_index =
+                static_cast<uint32_t>(ty) * width + static_cast<uint32_t>(tx);
+            rotated[dest_index] += crust;
+            age_accumulator[dest_index] += crust * static_cast<float>(age_map[index]);
         }
     }
 

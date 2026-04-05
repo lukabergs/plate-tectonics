@@ -178,8 +178,10 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
                          float _rotation_strength, float _subduction_strength,
                          int32_t sea_level_m_override, uint16_t _initial_min_height_m,
                          uint16_t _initial_max_height_m) noexcept(false)
-    : hmap(width, height), imap(width, height), prev_imap(width, height), amap(width, height),
-      plates(nullptr), plate_areas(_max_plates), plate_indices_found(_max_plates),
+    : hmap(width, height), display_hmap(width, height), prev_display_hmap(width, height),
+      initial_hmap(width, height), imap(width, height), prev_imap(width, height),
+      amap(width, height), plates(nullptr), plate_areas(_max_plates),
+      plate_indices_found(_max_plates),
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
       erosion_period(_erosion_period), folding_ratio(_folding_ratio), iter_count(0),
       max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
@@ -308,6 +310,166 @@ void lithosphere::growPlates() {
     }
 }
 
+void lithosphere::rebuildPlateAreasFromOwnership() {
+    for (uint32_t i = 0; i < num_plates; ++i) {
+        plateArea& area = plate_areas[i];
+        area.border.clear();
+        area.lft = _worldDimension.getWidth();
+        area.rgt = 0;
+        area.top = _worldDimension.getHeight();
+        area.btm = 0;
+        area.wdt = 0;
+        area.hgt = 0;
+    }
+
+    const uint32_t width = _worldDimension.getWidth();
+    const uint32_t height = _worldDimension.getHeight();
+    const uint32_t map_area = _worldDimension.getArea();
+    std::vector<uint8_t> touches_boundary(map_area, 0);
+
+    for (uint32_t index = 0; index < map_area; ++index) {
+        const uint32_t owner = imap[index];
+        ASSERT(owner < num_plates, "A point was not assigned to any plate");
+
+        const uint32_t x = _worldDimension.xFromIndex(index);
+        const uint32_t y = _worldDimension.yFromIndex(index);
+        plateArea& area = plate_areas[owner];
+
+        area.lft = std::min(area.lft, x);
+        area.rgt = std::max(area.rgt, x);
+        area.top = std::min(area.top, y);
+        area.btm = std::max(area.btm, y);
+
+        const uint32_t left_x = x > 0 ? x - 1 : width - 1;
+        const uint32_t right_x = x + 1 < width ? x + 1 : 0;
+        const uint32_t top_y = y > 0 ? y - 1 : height - 1;
+        const uint32_t bottom_y = y + 1 < height ? y + 1 : 0;
+        const uint32_t neighbors[] = {
+            _worldDimension.indexOf(left_x, y),
+            _worldDimension.indexOf(right_x, y),
+            _worldDimension.indexOf(x, top_y),
+            _worldDimension.indexOf(x, bottom_y),
+        };
+
+        for (uint32_t neighbor : neighbors) {
+            if (imap[neighbor] != owner) {
+                touches_boundary[index] = 1;
+                break;
+            }
+        }
+    }
+
+    for (uint32_t index = 0; index < map_area; ++index) {
+        if (touches_boundary[index]) {
+            plate_areas[imap[index]].border.push_back(index);
+        }
+    }
+
+    for (uint32_t i = 0; i < num_plates; ++i) {
+        plateArea& area = plate_areas[i];
+        area.wdt = area.rgt >= area.lft ? area.rgt - area.lft + 1U : 1U;
+        area.hgt = area.btm >= area.top ? area.btm - area.top + 1U : 1U;
+    }
+}
+
+void lithosphere::jaggedizePlateBoundaries() {
+    const uint32_t width = _worldDimension.getWidth();
+    const uint32_t height = _worldDimension.getHeight();
+    const uint32_t map_area = _worldDimension.getArea();
+    std::vector<uint32_t> counts(num_plates, 0);
+    for (uint32_t index = 0; index < map_area; ++index) {
+        ASSERT(imap[index] < num_plates, "A point was not assigned to any plate");
+        ++counts[imap[index]];
+    }
+
+    IndexMap current = imap;
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+        IndexMap next = current;
+        std::vector<uint32_t> next_counts = counts;
+
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                const uint32_t index = _worldDimension.indexOf(x, y);
+                const uint32_t owner = current[index];
+                if (next_counts[owner] <= 1U) {
+                    continue;
+                }
+
+                const uint32_t left_x = x > 0 ? x - 1 : width - 1;
+                const uint32_t right_x = x + 1 < width ? x + 1 : 0;
+                const uint32_t top_y = y > 0 ? y - 1 : height - 1;
+                const uint32_t bottom_y = y + 1 < height ? y + 1 : 0;
+                struct NeighborWeight {
+                    uint32_t index;
+                    float weight;
+                };
+                const NeighborWeight neighbors[] = {
+                    {_worldDimension.indexOf(left_x, y), 1.0f},
+                    {_worldDimension.indexOf(right_x, y), 1.0f},
+                    {_worldDimension.indexOf(x, top_y), 1.0f},
+                    {_worldDimension.indexOf(x, bottom_y), 1.0f},
+                    {_worldDimension.indexOf(left_x, top_y), 0.7f},
+                    {_worldDimension.indexOf(right_x, top_y), 0.7f},
+                    {_worldDimension.indexOf(left_x, bottom_y), 0.7f},
+                    {_worldDimension.indexOf(right_x, bottom_y), 0.7f},
+                };
+
+                bool touches_other_owner = false;
+                std::vector<uint32_t> candidates;
+                candidates.reserve(6);
+                push_unique_owner(candidates, owner, num_plates);
+                for (const NeighborWeight& neighbor : neighbors) {
+                    const uint32_t neighbor_owner = current[neighbor.index];
+                    touches_other_owner = touches_other_owner || neighbor_owner != owner;
+                    push_unique_owner(candidates, neighbor_owner, num_plates);
+                }
+                if (!touches_other_owner) {
+                    continue;
+                }
+
+                uint32_t best_owner = owner;
+                float best_score = -FLT_MAX;
+                for (uint32_t candidate : candidates) {
+                    float score = candidate == owner ? 1.35f : 0.0f;
+                    for (const NeighborWeight& neighbor : neighbors) {
+                        if (current[neighbor.index] == candidate) {
+                            score += neighbor.weight;
+                        }
+                    }
+
+                    const float owner_bias = scaled_octave_noise_4d(
+                        4.0f, 0.57f, 0.10f, -1.0f, 1.0f,
+                        static_cast<float>(x) * 0.9f + static_cast<float>(candidate) * 13.0f + 17.0f,
+                        static_cast<float>(y) * 0.9f + static_cast<float>(candidate) * 7.0f + 29.0f,
+                        static_cast<float>(pass) * 0.37f, static_cast<float>(candidate) * 19.0f + 11.0f);
+                    const float warp_bias = scaled_octave_noise_4d(
+                        2.0f, 0.50f, 0.23f, -1.0f, 1.0f,
+                        static_cast<float>(x) * 1.75f + 5.0f, static_cast<float>(y) * 1.75f + 13.0f,
+                        static_cast<float>(candidate) * 0.41f, static_cast<float>(pass) * 3.0f + 43.0f);
+                    score += owner_bias * 1.15f + warp_bias * 0.75f;
+
+                    if (score > best_score) {
+                        best_score = score;
+                        best_owner = candidate;
+                    }
+                }
+
+                if (best_owner != owner && next_counts[owner] > 1U) {
+                    next[index] = best_owner;
+                    --next_counts[owner];
+                    ++next_counts[best_owner];
+                }
+            }
+        }
+
+        current = next;
+        counts.swap(next_counts);
+    }
+
+    imap = current;
+    rebuildPlateAreasFromOwnership();
+}
+
 void lithosphere::createPlates() {
     try {
         const uint32_t map_area = _worldDimension.getArea();
@@ -342,6 +504,7 @@ void lithosphere::createPlates() {
         imap.set_all(0xFFFFFFFF);
 
         growPlates();
+        jaggedizePlateBoundaries();
 
         // check all the points of the map are owned
         for (uint32_t i = 0; i < map_area; i++) {
@@ -397,7 +560,7 @@ const uint32_t* lithosphere::getAgeMap() const throw() {
 }
 
 float* lithosphere::getTopography() const throw() {
-    return hmap.raw_data();
+    return display_hmap.raw_data();
 }
 
 bool lithosphere::isOceanic(float value) const noexcept {
@@ -408,6 +571,7 @@ void lithosphere::resetSimulationState() {
     amap.set_all(0);
     imap.set_all(0xFFFFFFFF);
     prev_imap.set_all(0xFFFFFFFF);
+    prev_display_hmap = display_hmap;
 
     for (uint32_t i = 0; i < max_plates; ++i) {
         collisions[i].clear();
@@ -433,6 +597,9 @@ void lithosphere::initializeHeightMapFromMetric(const uint16_t* heightmap_m, uin
     for (uint32_t i = 0; i < map_area; ++i) {
         hmap[i] = TopographyCodec::meters_to_internal(heightmap_m[i], sea_level_m);
     }
+    display_hmap = hmap;
+    prev_display_hmap = display_hmap;
+    initial_hmap = hmap;
 }
 
 void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override) {
@@ -608,6 +775,9 @@ void lithosphere::importNormalizedHeightMap(const float* normalized_map, float s
     for (uint32_t i = 0; i < map_area; ++i) {
         hmap[i] = TopographyCodec::normalized_to_internal(normalized_map[i], sea_threshold);
     }
+    display_hmap = hmap;
+    prev_display_hmap = display_hmap;
+    initial_hmap = hmap;
 
     resetSimulationState();
     createPlates();
@@ -959,15 +1129,6 @@ bool lithosphere::hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const {
 
 void lithosphere::regenerateCrust() {
     const uint32_t map_area = _worldDimension.getArea();
-    const float regenerated_floor =
-        TopographyCodec::meters_to_internal(initial_min_height_m, sea_level_m);
-    const uint16_t oceanic_ceiling_m =
-        sea_level_m > 0 ? static_cast<uint16_t>(sea_level_m - 1U) : 0U;
-    const float regenerated_visual_ceiling = std::min(
-        TopographyCodec::meters_to_internal(oceanic_ceiling_m, sea_level_m),
-        std::nextafter(CONTINENTAL_BASE - BUOYANCY_BONUS_X * OCEANIC_BASE, OCEANIC_BASE));
-    const float regenerated_visual_span =
-        std::max(0.0f, regenerated_visual_ceiling - regenerated_floor);
     std::vector<uint32_t> frontier;
     std::vector<uint8_t> queued(map_area, 0);
     frontier.reserve(map_area / 32);
@@ -1139,10 +1300,8 @@ void lithosphere::regenerateCrust() {
         const float ridge_bias = flow_pulse * opening_strength;
         const float generated_crust =
             OCEANIC_BASE * (0.58f + 1.25f * coherent_strength + 0.55f * ridge_bias);
-        const float visual_ratio =
-            clamp_unit(0.08f + 0.58f * coherent_strength + 0.18f * ridge_bias);
 
-        hmap[index] = regenerated_floor + regenerated_visual_span * visual_ratio;
+        hmap[index] = generated_crust;
         plates[imap[index]]->setCrust(x, y, generated_crust, iter_count);
         ++plate_indices_found[imap[index]];
     };
@@ -1261,6 +1420,7 @@ void lithosphere::update() {
         const uint32_t map_area = _worldDimension.getArea();
         // Keep a copy of the previous index map
         prev_imap.copy(imap);
+        prev_display_hmap.copy(display_hmap);
 
         // Realize accumulated external forces to each plate.
         for (uint32_t i = 0; i < num_plates; ++i) {
@@ -1276,6 +1436,7 @@ void lithosphere::update() {
         uint32_t continental_collisions = 0;
 
         updateHeightAndPlateIndexMaps(oceanic_collisions, continental_collisions);
+        display_hmap = hmap;
 
         // Update the counter of iterations since last continental collision.
         last_coll_count = (last_coll_count + 1) & -(continental_collisions == 0);
@@ -1322,6 +1483,31 @@ void lithosphere::update() {
 
             hmap[i] += isOceanic(hmap[i]) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
                        MULINV_MAX_BUOYANCY_AGE;
+        }
+
+        for (uint32_t i = 0; i < map_area; ++i) {
+            float visual_height = hmap[i];
+            if (imap[i] < num_plates && amap[i] > 0) {
+                uint32_t crust_age = iter_count - amap[i];
+                if (crust_age <= 12U) {
+                    const float previous_visual =
+                        prev_display_hmap[i] > 0.0f ? prev_display_hmap[i] : initial_hmap[i];
+                    const float carry_ratio = 1.0f - static_cast<float>(crust_age) / 12.0f;
+                    const uint32_t x = _worldDimension.xFromIndex(i);
+                    const uint32_t y = _worldDimension.yFromIndex(i);
+                    const float flux_noise = scaled_octave_noise_4d(
+                        3.0f, 0.52f, 0.11f, -1.0f, 1.0f,
+                        static_cast<float>(x) * 0.65f + static_cast<float>(imap[i]) * 17.0f + 17.0f,
+                        static_cast<float>(y) * 0.65f + static_cast<float>(imap[i]) * 7.0f + 29.0f,
+                        static_cast<float>(iter_count) * 0.045f,
+                        static_cast<float>(imap[i]) * 19.0f + 11.0f);
+                    const float flux_delta = flux_noise * (0.006f + 0.016f * carry_ratio);
+                    visual_height = std::max(visual_height, previous_visual + flux_delta);
+                }
+            }
+
+            display_hmap[i] =
+                std::max(0.0f, std::min(CONTINENTAL_BASE + 1.0f, visual_height));
         }
 
         ++iter_count;
@@ -1371,8 +1557,12 @@ void lithosphere::restart() {
                 }
             }
         }
+        display_hmap = hmap;
+        prev_display_hmap = display_hmap;
+        initial_hmap = display_hmap;
         // Clear plate array
         clearPlates();
+
 
         // create new plates IFF there are cycles left to run!
         // However, if max cycle count is "ETERNITY", then 0 < 0 + 1 always.
@@ -1415,6 +1605,8 @@ void lithosphere::restart() {
             hmap[i] += isOceanic(hmap[i]) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
                        MULINV_MAX_BUOYANCY_AGE;
         }
+        display_hmap = hmap;
+        prev_display_hmap = display_hmap;
     } catch (const exception& e) {
         std::string msg = "Problem during restart: ";
         msg = msg + e.what();

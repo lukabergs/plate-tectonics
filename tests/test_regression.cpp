@@ -25,6 +25,7 @@
 #include "platecapi.hpp"
 #include "gtest/gtest.h"
 #include "lithosphere.hpp"
+#include "plate.hpp"
 #include "topography_codec.hpp"
 #include <cstdlib>
 #include <cstring>
@@ -201,8 +202,8 @@ TEST(Regression, InitialOceanBathymetryIsNotFlat) {
 
 TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
     lithosphere sim(12345, 128, 64, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10);
-    const float regenerated_floor = TopographyCodec::meters_to_internal(
-        TopographyCodec::kDefaultInitialMinHeightMeters, sim.getSeaLevelMeters());
+    const size_t map_size = static_cast<size_t>(sim.getWidth()) * static_cast<size_t>(sim.getHeight());
+    std::vector<float> initial_map(sim.getTopography(), sim.getTopography() + map_size);
 
     bool observed_regeneration = false;
     for (uint32_t step = 0; step < 48 && !observed_regeneration; ++step) {
@@ -213,10 +214,11 @@ TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
         const uint32_t height = sim.getHeight();
         const float* heightmap = sim.getTopography();
         const uint32_t* agemap = sim.getAgeMap();
+        const uint32_t* plate_map = sim.getPlatesMap();
 
         size_t regenerated_count = 0;
-        float regenerated_min = 0.0f;
-        float regenerated_max = 0.0f;
+        float regenerated_delta_min = 0.0f;
+        float regenerated_delta_max = 0.0f;
         float adjacent_diff_sum = 0.0f;
         float adjacent_diff_max = 0.0f;
         size_t adjacent_pairs = 0;
@@ -224,39 +226,56 @@ TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
         for (uint32_t y = 0; y < height; ++y) {
             for (uint32_t x = 0; x < width; ++x) {
                 const size_t index = static_cast<size_t>(y) * width + x;
-                if (agemap[index] != newest_age ||
-                    !TopographyCodec::is_oceanic_internal(heightmap[index])) {
+                if (agemap[index] != newest_age || plate_map[index] >= sim.getPlateCount()) {
                     continue;
                 }
 
+                const plate* owner = sim.getPlate(plate_map[index]);
+                ASSERT_NE(owner, nullptr);
+                const float owner_crust = owner->getCrust(x, y);
+                if (!TopographyCodec::is_oceanic_internal(owner_crust)) {
+                    continue;
+                }
+
+                const float regenerated_delta = heightmap[index] - initial_map[index];
                 if (regenerated_count == 0) {
-                    regenerated_min = heightmap[index];
-                    regenerated_max = heightmap[index];
+                    regenerated_delta_min = regenerated_delta;
+                    regenerated_delta_max = regenerated_delta;
                 } else {
-                    regenerated_min = std::min(regenerated_min, heightmap[index]);
-                    regenerated_max = std::max(regenerated_max, heightmap[index]);
+                    regenerated_delta_min = std::min(regenerated_delta_min, regenerated_delta);
+                    regenerated_delta_max = std::max(regenerated_delta_max, regenerated_delta);
                 }
                 ++regenerated_count;
 
                 if (x + 1 < width) {
                     const size_t right = index + 1;
-                    if (agemap[right] == newest_age &&
-                        TopographyCodec::is_oceanic_internal(heightmap[right])) {
-                        const float diff = std::fabs(heightmap[index] - heightmap[right]);
-                        adjacent_diff_sum += diff;
-                        adjacent_diff_max = std::max(adjacent_diff_max, diff);
-                        ++adjacent_pairs;
+                    if (agemap[right] == newest_age && plate_map[right] < sim.getPlateCount()) {
+                        const plate* right_owner = sim.getPlate(plate_map[right]);
+                        ASSERT_NE(right_owner, nullptr);
+                        if (TopographyCodec::is_oceanic_internal(
+                                right_owner->getCrust(x + 1, y))) {
+                            const float diff = std::fabs(
+                                owner_crust - right_owner->getCrust(x + 1, y));
+                            adjacent_diff_sum += diff;
+                            adjacent_diff_max = std::max(adjacent_diff_max, diff);
+                            ++adjacent_pairs;
+                        }
                     }
                 }
 
                 if (y + 1 < height) {
                     const size_t down = index + width;
-                    if (agemap[down] == newest_age &&
-                        TopographyCodec::is_oceanic_internal(heightmap[down])) {
-                        const float diff = std::fabs(heightmap[index] - heightmap[down]);
-                        adjacent_diff_sum += diff;
-                        adjacent_diff_max = std::max(adjacent_diff_max, diff);
-                        ++adjacent_pairs;
+                    if (agemap[down] == newest_age && plate_map[down] < sim.getPlateCount()) {
+                        const plate* down_owner = sim.getPlate(plate_map[down]);
+                        ASSERT_NE(down_owner, nullptr);
+                        if (TopographyCodec::is_oceanic_internal(
+                                down_owner->getCrust(x, y + 1))) {
+                            const float diff = std::fabs(
+                                owner_crust - down_owner->getCrust(x, y + 1));
+                            adjacent_diff_sum += diff;
+                            adjacent_diff_max = std::max(adjacent_diff_max, diff);
+                            ++adjacent_pairs;
+                        }
                     }
                 }
             }
@@ -264,8 +283,9 @@ TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
 
         if (regenerated_count >= 12 && adjacent_pairs >= 8) {
             observed_regeneration = true;
-            EXPECT_GE(regenerated_min, regenerated_floor);
-            EXPECT_GT(regenerated_max - regenerated_min, 0.02f);
+            EXPECT_GE(regenerated_delta_min, -0.03f);
+            EXPECT_GT(regenerated_delta_max - regenerated_delta_min, 0.02f);
+            EXPECT_GT(regenerated_delta_max, 0.01f);
             EXPECT_LT(adjacent_diff_sum / static_cast<float>(adjacent_pairs), 0.06f);
             EXPECT_LT(adjacent_diff_max, 0.14f);
         }
@@ -428,24 +448,24 @@ TEST(Regression, SimulationSeed12345_OutputConsistency) {
 
     // Keep both architecture baselines aligned until a fresh ARM64 capture is available.
     HeightmapStats expected_final_arm64 = {
-        0.0103608f,  // min
-        40.8962f,    // max
-        1.19402f,    // mean
-        0.144882f,   // median
-        2.59856f,    // std_dev
-        0.117956f,   // q25
-        1.15456f     // q75
+        0.0776743f,  // min
+        50.2339f,    // max
+        1.26174f,    // mean
+        0.224503f,   // median
+        2.50721f,    // std_dev
+        0.120296f,   // q25
+        1.34951f     // q75
     };
 
     // Baseline: Windows/Ubuntu x86-64 (MSVC/GCC, AVX2/SSE)
     HeightmapStats expected_final_x86 = {
-        0.0103608f,  // min
-        40.8962f,    // max
-        1.19402f,    // mean
-        0.144882f,   // median
-        2.59856f,    // std_dev
-        0.117956f,   // q25
-        1.15456f     // q75
+        0.0776743f,  // min
+        50.2339f,    // max
+        1.26174f,    // mean
+        0.224503f,   // median
+        2.50721f,    // std_dev
+        0.120296f,   // q25
+        1.34951f     // q75
     };
 
     // Check initial state (should match on all platforms)
