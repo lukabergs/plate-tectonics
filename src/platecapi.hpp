@@ -20,6 +20,7 @@
 #ifndef PLATECAPI_H
 #define PLATECAPI_H
 
+#include "topography_codec.hpp"
 #include "utils.hpp"
 #include <string.h> // For size_t.
 
@@ -28,7 +29,9 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
                         float aggr_overlap_rel, uint32_t cycle_count, uint32_t num_plates,
                         float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
                         float rotation_strength = 1.0f, float subduction_strength = 1.0f,
-                        int32_t sea_level_m = -1);
+                        int32_t sea_level_m = -1,
+                        uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
+                        uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters);
 
 void platec_api_destroy(void*);
 const uint32_t* platec_api_get_agemap(uint32_t);

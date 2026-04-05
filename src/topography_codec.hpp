@@ -2,6 +2,7 @@
 #define TOPOGRAPHY_CODEC_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "utils.hpp"
@@ -9,6 +10,8 @@
 namespace TopographyCodec {
 
 constexpr uint16_t kMaxHeightMeters = 65535;
+constexpr uint16_t kDefaultInitialMinHeightMeters = 10000;
+constexpr uint16_t kDefaultInitialMaxHeightMeters = 30000;
 constexpr int32_t kNoSeaLevelOverride = -1;
 constexpr uint32_t kMetadataVersion = 1;
 constexpr float kOceanicBase = 0.1f;

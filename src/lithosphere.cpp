@@ -50,6 +50,102 @@ static const uint32_t NO_COLLISION_TIME_LIMIT = 10;
 uint32_t findBound(const uint32_t* map, uint32_t length, uint32_t x0, uint32_t y0, int dx, int dy);
 uint32_t findPlate(plate** plates, float x, float y, uint32_t num_plates);
 
+namespace {
+
+struct FractalNoiseConfig {
+    float octaves;
+    float persistence;
+    float scale;
+    float noise_scale;
+    float offset_a;
+    float offset_b;
+    float offset_c;
+    float offset_d;
+};
+
+float wrap_coordinate(float value, float period) {
+    float wrapped = std::fmod(value, period);
+    if (wrapped < 0.0f) {
+        wrapped += period;
+    }
+    return wrapped;
+}
+
+float wrapped_delta(float value, float reference, float period) {
+    float delta = value - reference;
+    if (delta > period * 0.5f) {
+        delta -= period;
+    } else if (delta < -period * 0.5f) {
+        delta += period;
+    }
+    return delta;
+}
+
+FractalNoiseConfig make_noise_config(SimpleRandom& randsource, float octaves, float persistence,
+                                     float scale, float noise_scale) {
+    const uint32_t seed = randsource.next();
+    return FractalNoiseConfig {
+        octaves,
+        persistence,
+        scale,
+        noise_scale,
+        17.0f + static_cast<float>((seed * 13U) % 1024U) * 0.03125f,
+        29.0f + static_cast<float>((seed * 29U) % 1024U) * 0.03125f,
+        43.0f + static_cast<float>((seed * 43U) % 1024U) * 0.03125f,
+        61.0f + static_cast<float>((seed * 61U) % 1024U) * 0.03125f,
+    };
+}
+
+float sample_toroidal_noise(float x, float y, const WorldDimension& dimension,
+                            const FractalNoiseConfig& config) {
+    const float width = static_cast<float>(dimension.getWidth());
+    const float height = static_cast<float>(dimension.getHeight());
+    const float wrapped_x = wrap_coordinate(x, width) / width;
+    const float wrapped_y = wrap_coordinate(y, height) / height;
+    const float theta = wrapped_x * 2.0f * PI;
+    const float phi = wrapped_y * 2.0f * PI;
+    const float sin_theta = std::sin(theta);
+    const float cos_theta = std::cos(theta);
+    const float sin_phi = std::sin(phi);
+    const float cos_phi = std::cos(phi);
+
+    return scaled_octave_noise_4d(config.octaves, config.persistence, config.scale, -1.0f, 1.0f,
+                                  config.offset_a + sin_theta * config.noise_scale,
+                                  config.offset_b + cos_theta * config.noise_scale,
+                                  config.offset_c + sin_phi * config.noise_scale,
+                                  config.offset_d + cos_phi * config.noise_scale);
+}
+
+float logistic(float value, float sharpness) {
+    return 1.0f / (1.0f + std::exp(-value * sharpness));
+}
+
+float clamp_unit(float value) {
+    return std::max(0.0f, std::min(1.0f, value));
+}
+
+float remap_to_range(float value, float min_value, float max_value, float target_min,
+                     float target_max) {
+    if (max_value - min_value <= FLT_EPSILON) {
+        return 0.5f * (target_min + target_max);
+    }
+    return target_min +
+           ((value - min_value) / (max_value - min_value)) * (target_max - target_min);
+}
+
+float quantile_threshold(std::vector<float> values, float quantile) {
+    if (values.empty()) {
+        return 0.0f;
+    }
+    std::sort(values.begin(), values.end());
+    const float clamped_quantile = std::max(0.0f, std::min(1.0f, quantile));
+    const size_t index = static_cast<size_t>(
+        std::floor(clamped_quantile * static_cast<float>(values.size() - 1)));
+    return values[index];
+}
+
+} // namespace
+
 static void push_unique_owner(std::vector<uint32_t>& candidates, uint32_t owner, uint32_t plate_count) {
     if (owner >= plate_count) {
         return;
@@ -60,33 +156,6 @@ static void push_unique_owner(std::vector<uint32_t>& candidates, uint32_t owner,
         }
     }
     candidates.push_back(owner);
-}
-
-static void normalize_noise_field(std::vector<float>& values) {
-    if (values.empty()) {
-        return;
-    }
-
-    float lowest = values[0];
-    float highest = values[0];
-    for (size_t i = 1; i < values.size(); ++i) {
-        lowest = std::min(lowest, values[i]);
-        highest = std::max(highest, values[i]);
-    }
-
-    const float range = highest - lowest;
-    if (range <= FLT_EPSILON) {
-        std::fill(values.begin(), values.end(), 0.5f);
-        return;
-    }
-
-    for (float& value : values) {
-        value = (value - lowest) / range;
-    }
-}
-
-static float signed_noise(float normalized_noise) {
-    return TopographyCodec::clamp_normalized(normalized_noise) * 2.0f - 1.0f;
 }
 
 WorldPoint lithosphere::randomPosition() {
@@ -107,7 +176,8 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
                          float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
                          float _erosion_strength, float _crust_rotation_strength,
                          float _rotation_strength, float _subduction_strength,
-                         int32_t sea_level_m_override) noexcept(false)
+                         int32_t sea_level_m_override, uint16_t _initial_min_height_m,
+                         uint16_t _initial_max_height_m) noexcept(false)
     : hmap(width, height), imap(width, height), prev_imap(width, height), amap(width, height),
       plates(nullptr), plate_areas(_max_plates), plate_indices_found(_max_plates),
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(aggr_ratio_rel), cycle_count(0),
@@ -118,9 +188,24 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
       rotation_strength(_rotation_strength < 0.0f ? 0.0f : _rotation_strength),
       subduction_strength(_subduction_strength < 0.0f ? 0.0f : _subduction_strength),
       sea_level_m(TopographyCodec::legacy_raw_sea_level_m()),
+      initial_min_height_m(_initial_min_height_m),
+      initial_max_height_m(_initial_max_height_m),
       _worldDimension(width, height), _randsource(seed), _steps(0) {
     if (width < 5 || height < 5) {
         throw runtime_error("Width and height should be >=5");
+    }
+    if (initial_min_height_m >= initial_max_height_m) {
+        throw runtime_error("Initial minimum height must be lower than the initial maximum height");
+    }
+    if (static_cast<uint32_t>(initial_max_height_m) - static_cast<uint32_t>(initial_min_height_m) <
+        2U) {
+        throw runtime_error(
+            "Initial height range must leave room for both ocean and land values");
+    }
+    if (sea_level_m_override != TopographyCodec::kNoSeaLevelOverride &&
+        (sea_level_m_override <= static_cast<int32_t>(initial_min_height_m) ||
+         sea_level_m_override >= static_cast<int32_t>(initial_max_height_m))) {
+        throw runtime_error("Sea level override must lie between the initial min and max heights");
     }
 
     collisions.resize(max_plates);
@@ -352,57 +437,160 @@ void lithosphere::initializeHeightMapFromMetric(const uint16_t* heightmap_m, uin
 
 void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_m_override) {
     const uint32_t map_area = _worldDimension.getArea();
-    std::vector<float> continent_macro(map_area);
-    std::vector<float> continent_detail(map_area);
-    std::vector<float> shelf_noise(map_area);
-    std::vector<float> abyss_noise(map_area);
-    std::vector<float> ridge_noise(map_area);
-
-    createSlowNoise(continent_macro.data(), _worldDimension);
-    createSlowNoise(continent_detail.data(), _worldDimension);
-    createSlowNoise(shelf_noise.data(), _worldDimension);
-    createSlowNoise(abyss_noise.data(), _worldDimension);
-    createSlowNoise(ridge_noise.data(), _worldDimension);
-
-    normalize_noise_field(continent_macro);
-    normalize_noise_field(continent_detail);
-    normalize_noise_field(shelf_noise);
-    normalize_noise_field(abyss_noise);
-    normalize_noise_field(ridge_noise);
-
-    std::vector<uint16_t> metric_heightmap(map_area);
-    for (uint32_t i = 0; i < map_area; ++i) {
-        const float macro = signed_noise(continent_macro[i]);
-        const float detail = signed_noise(continent_detail[i]);
-        const float shelf = signed_noise(shelf_noise[i]);
-        const float abyss = signed_noise(abyss_noise[i]);
-        const float ridge = signed_noise(ridge_noise[i]);
-
-        const float continentality = 0.68f * macro + 0.22f * detail + 0.10f * shelf;
-
-        float normalized_height = 0.0f;
-        if (continentality >= 0.0f) {
-            const float land_relief = TopographyCodec::clamp_normalized(
-                0.56f + 0.22f * macro + 0.12f * detail + 0.07f * ridge + 0.03f * shelf);
-            normalized_height = 0.56f + land_relief * 0.44f;
-        } else {
-            const float ocean_relief = TopographyCodec::clamp_normalized(
-                0.44f + 0.26f * (-continentality) + 0.16f * abyss + 0.09f * shelf - 0.11f * ridge);
-            normalized_height = ocean_relief * 0.42f;
-        }
-
-        metric_heightmap[i] = static_cast<uint16_t>(std::lround(
-            TopographyCodec::clamp_normalized(normalized_height) *
-            static_cast<float>(TopographyCodec::kMaxHeightMeters)));
-    }
-
-    const bool has_override = sea_level_m_override >= 0 &&
-                              sea_level_m_override <= TopographyCodec::kMaxHeightMeters;
-    const uint16_t initial_sea_level_m =
+    const bool has_override = sea_level_m_override != TopographyCodec::kNoSeaLevelOverride;
+    const uint16_t provisional_sea_level_m =
         has_override
             ? static_cast<uint16_t>(sea_level_m_override)
-            : TopographyCodec::infer_metric_sea_level(metric_heightmap.data(), metric_heightmap.size(),
-                                                      ocean_coverage);
+            : static_cast<uint16_t>(initial_min_height_m +
+                                    (initial_max_height_m - initial_min_height_m) / 2U);
+
+    const FractalNoiseConfig warp_x_noise = make_noise_config(_randsource, 4.0f, 0.58f, 0.45f, 1.6f);
+    const FractalNoiseConfig warp_y_noise = make_noise_config(_randsource, 4.0f, 0.58f, 0.45f, 1.6f);
+    const FractalNoiseConfig continent_macro_noise =
+        make_noise_config(_randsource, 5.0f, 0.57f, 0.16f, 0.95f);
+    const FractalNoiseConfig continent_detail_noise =
+        make_noise_config(_randsource, 6.0f, 0.59f, 0.42f, 1.85f);
+    const FractalNoiseConfig coast_breakup_noise =
+        make_noise_config(_randsource, 6.0f, 0.57f, 0.62f, 2.2f);
+    const FractalNoiseConfig shelf_noise = make_noise_config(_randsource, 6.0f, 0.61f, 0.85f, 2.9f);
+    const FractalNoiseConfig sea_base_noise = make_noise_config(_randsource, 7.0f, 0.63f, 1.15f, 3.9f);
+    const FractalNoiseConfig sea_detail_noise =
+        make_noise_config(_randsource, 7.0f, 0.61f, 1.95f, 5.6f);
+    const FractalNoiseConfig sea_micro_noise = make_noise_config(_randsource, 5.0f, 0.48f, 3.95f, 10.2f);
+    const FractalNoiseConfig land_noise = make_noise_config(_randsource, 6.0f, 0.56f, 0.95f, 3.6f);
+    const FractalNoiseConfig foothill_noise =
+        make_noise_config(_randsource, 6.0f, 0.53f, 1.55f, 4.7f);
+    const FractalNoiseConfig mountain_noise =
+        make_noise_config(_randsource, 5.0f, 0.47f, 2.45f, 6.3f);
+    const FractalNoiseConfig ridge_noise = make_noise_config(_randsource, 5.0f, 0.50f, 2.6f, 7.4f);
+    const FractalNoiseConfig trench_noise = make_noise_config(_randsource, 5.0f, 0.48f, 3.8f, 9.8f);
+
+    std::vector<float> warped_x(map_area);
+    std::vector<float> warped_y(map_area);
+    std::vector<float> continentality(map_area);
+    std::vector<float> raw_height(map_area);
+    std::vector<uint8_t> is_land(map_area, 0);
+
+    for (uint32_t y = 0; y < _worldDimension.getHeight(); ++y) {
+        for (uint32_t x = 0; x < _worldDimension.getWidth(); ++x) {
+            const uint32_t index = _worldDimension.indexOf(x, y);
+            const float warp_x = sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
+                                                       _worldDimension, warp_x_noise) *
+                                 18.0f;
+            const float warp_y = sample_toroidal_noise(static_cast<float>(x), static_cast<float>(y),
+                                                       _worldDimension, warp_y_noise) *
+                                 18.0f;
+            const float sample_x = static_cast<float>(x) + warp_x;
+            const float sample_y = static_cast<float>(y) + warp_y;
+            warped_x[index] = sample_x;
+            warped_y[index] = sample_y;
+            const float macro = sample_toroidal_noise(sample_x, sample_y, _worldDimension,
+                                                      continent_macro_noise);
+            const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
+                                                       _worldDimension, continent_detail_noise);
+            const float coast_breakup = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f,
+                                                              _worldDimension,
+                                                              coast_breakup_noise);
+            continentality[index] = macro * 0.70f + detail * 0.22f + coast_breakup * 0.08f;
+        }
+    }
+
+    const float continent_threshold = quantile_threshold(continentality, ocean_coverage);
+    float raw_land_min = FLT_MAX;
+    float raw_land_max = -FLT_MAX;
+    float raw_ocean_min = FLT_MAX;
+    float raw_ocean_max = -FLT_MAX;
+
+    for (uint32_t y = 0; y < _worldDimension.getHeight(); ++y) {
+        for (uint32_t x = 0; x < _worldDimension.getWidth(); ++x) {
+            const uint32_t index = _worldDimension.indexOf(x, y);
+            const float sample_x = warped_x[index];
+            const float sample_y = warped_y[index];
+            const float detail = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
+                                                       _worldDimension, continent_detail_noise);
+            const float shelf = sample_toroidal_noise(sample_x * 1.4f, sample_y * 1.4f,
+                                                      _worldDimension, shelf_noise);
+            const float sea_base = sample_toroidal_noise(sample_x * 1.15f, sample_y * 1.15f,
+                                                         _worldDimension, sea_base_noise);
+            const float sea_detail = sample_toroidal_noise(sample_x * 2.3f, sample_y * 2.3f,
+                                                           _worldDimension, sea_detail_noise);
+            const float sea_micro = sample_toroidal_noise(sample_x * 4.8f, sample_y * 4.8f,
+                                                          _worldDimension, sea_micro_noise);
+            const float land_detail = sample_toroidal_noise(sample_x * 1.55f, sample_y * 1.55f,
+                                                            _worldDimension, land_noise);
+            const float foothills = sample_toroidal_noise(sample_x * 2.15f, sample_y * 2.15f,
+                                                          _worldDimension, foothill_noise);
+            const float mountains =
+                1.0f - std::abs(sample_toroidal_noise(sample_x * 3.05f, sample_y * 3.05f,
+                                                      _worldDimension, mountain_noise));
+            const float ridge = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.1f, sample_y * 2.1f,
+                                                                      _worldDimension, ridge_noise));
+            const float trench = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.35f, sample_y * 2.35f,
+                                                                       _worldDimension, trench_noise));
+            const float distance_to_coast = continentality[index] - continent_threshold;
+
+            if (distance_to_coast >= 0.0f) {
+                is_land[index] = 1U;
+                const float inland_bias = logistic(distance_to_coast + 0.05f * land_detail, 8.0f);
+                const float coastal_bias = 1.0f - inland_bias;
+                raw_height[index] = 0.34f * inland_bias - 0.08f * coastal_bias +
+                                    0.18f * detail + 0.19f * land_detail + 0.15f * foothills +
+                                    0.17f * mountains + 0.10f * ridge - 0.05f * trench +
+                                    0.04f * shelf;
+                raw_land_min = std::min(raw_land_min, raw_height[index]);
+                raw_land_max = std::max(raw_land_max, raw_height[index]);
+            } else {
+                const float shelf_weight = logistic(distance_to_coast + 0.10f * shelf + 0.05f, 11.0f);
+                const float abyss_weight = 1.0f - shelf_weight;
+                raw_height[index] = -0.62f * abyss_weight - 0.16f * shelf_weight +
+                                    0.17f * sea_base + 0.15f * sea_detail + 0.09f * sea_micro +
+                                    0.08f * shelf + 0.17f * ridge - 0.27f * trench +
+                                    0.04f * detail;
+                raw_ocean_min = std::min(raw_ocean_min, raw_height[index]);
+                raw_ocean_max = std::max(raw_ocean_max, raw_height[index]);
+            }
+        }
+    }
+
+    const float ocean_target_min = static_cast<float>(initial_min_height_m);
+    const float ocean_target_max = static_cast<float>(provisional_sea_level_m - 1U);
+    const float land_target_min = static_cast<float>(provisional_sea_level_m);
+    const float land_target_max = static_cast<float>(initial_max_height_m);
+
+    std::vector<uint16_t> metric_heightmap(map_area);
+    uint16_t ocean_metric_max = 0;
+    uint16_t land_metric_min = TopographyCodec::kMaxHeightMeters;
+    uint32_t ocean_count = 0;
+    uint32_t land_count = 0;
+    for (uint32_t i = 0; i < map_area; ++i) {
+        const float meters = is_land[i]
+            ? remap_to_range(raw_height[i], raw_land_min, raw_land_max, land_target_min,
+                             land_target_max)
+            : remap_to_range(raw_height[i], raw_ocean_min, raw_ocean_max, ocean_target_min,
+                             ocean_target_max);
+        const uint16_t sample = static_cast<uint16_t>(std::lround(meters));
+        metric_heightmap[i] = sample;
+        if (is_land[i]) {
+            land_metric_min = std::min(land_metric_min, sample);
+            ++land_count;
+        } else {
+            ocean_metric_max = std::max(ocean_metric_max, sample);
+            ++ocean_count;
+        }
+    }
+
+    const uint16_t initial_sea_level_m =
+        has_override
+            ? provisional_sea_level_m
+            : (ocean_count > 0U && land_count > 0U)
+                ? static_cast<uint16_t>(std::min<uint32_t>(
+                      land_metric_min,
+                      std::max<uint32_t>(
+                          static_cast<uint32_t>(ocean_metric_max) + 1U,
+                          TopographyCodec::infer_metric_sea_level(metric_heightmap.data(),
+                                                                  metric_heightmap.size(),
+                                                                  ocean_coverage))))
+                : provisional_sea_level_m;
     initializeHeightMapFromMetric(metric_heightmap.data(), initial_sea_level_m);
 }
 
@@ -771,6 +959,15 @@ bool lithosphere::hasAssignedOwnerNeighbor(uint32_t x, uint32_t y) const {
 
 void lithosphere::regenerateCrust() {
     const uint32_t map_area = _worldDimension.getArea();
+    const float regenerated_floor =
+        TopographyCodec::meters_to_internal(initial_min_height_m, sea_level_m);
+    const uint16_t oceanic_ceiling_m =
+        sea_level_m > 0 ? static_cast<uint16_t>(sea_level_m - 1U) : 0U;
+    const float regenerated_visual_ceiling = std::min(
+        TopographyCodec::meters_to_internal(oceanic_ceiling_m, sea_level_m),
+        std::nextafter(CONTINENTAL_BASE - BUOYANCY_BONUS_X * OCEANIC_BASE, OCEANIC_BASE));
+    const float regenerated_visual_span =
+        std::max(0.0f, regenerated_visual_ceiling - regenerated_floor);
     std::vector<uint32_t> frontier;
     std::vector<uint8_t> queued(map_area, 0);
     frontier.reserve(map_area / 32);
@@ -791,16 +988,163 @@ void lithosphere::regenerateCrust() {
         const uint32_t y = _worldDimension.yFromIndex(index);
         imap[index] = chooseDivergentOwner(x, y, index);
         amap[index] = iter_count;
-
-        const float roughness = scaled_octave_noise_4d(
-            3.0f, 0.5f, 0.08f, -0.12f, 0.12f, static_cast<float>(x) + 41.0f,
-            static_cast<float>(y) + 13.0f, static_cast<float>(iter_count) * 0.09f, 71.0f);
-        hmap[index] = OCEANIC_BASE * BUOYANCY_BONUS_X * (1.0f + roughness);
-
-        if (imap[index] < num_plates) {
-            plates[imap[index]]->setCrust(x, y, OCEANIC_BASE, iter_count);
-            ++plate_indices_found[imap[index]];
+        if (imap[index] >= num_plates) {
+            return;
         }
+
+        struct BoundaryOwnerSample {
+            uint32_t owner;
+            float dir_x;
+            float dir_y;
+            float dir_weight;
+            float retreat;
+            float velocity_x;
+            float velocity_y;
+        };
+
+        auto add_owner_sample = [&](std::vector<BoundaryOwnerSample>& samples, uint32_t owner,
+                                    float dir_x, float dir_y, float weight) {
+            if (owner >= num_plates || weight <= FLT_EPSILON) {
+                return;
+            }
+
+            const float length = std::sqrt(dir_x * dir_x + dir_y * dir_y);
+            if (length <= FLT_EPSILON) {
+                return;
+            }
+
+            const float nx = dir_x / length;
+            const float ny = dir_y / length;
+            for (BoundaryOwnerSample& sample : samples) {
+                if (sample.owner == owner) {
+                    sample.dir_x += nx * weight;
+                    sample.dir_y += ny * weight;
+                    sample.dir_weight += weight;
+                    return;
+                }
+            }
+
+            BoundaryOwnerSample sample{};
+            sample.owner = owner;
+            sample.dir_x = nx * weight;
+            sample.dir_y = ny * weight;
+            sample.dir_weight = weight;
+            sample.retreat = 0.0f;
+            sample.velocity_x = 0.0f;
+            sample.velocity_y = 0.0f;
+            samples.push_back(sample);
+        };
+
+        auto neighbor_direction = [&](uint32_t neighbor_x, uint32_t neighbor_y, float& dx,
+                                      float& dy) {
+            dx = wrapped_delta(static_cast<float>(neighbor_x), static_cast<float>(x),
+                               static_cast<float>(_worldDimension.getWidth()));
+            dy = wrapped_delta(static_cast<float>(neighbor_y), static_cast<float>(y),
+                               static_cast<float>(_worldDimension.getHeight()));
+        };
+
+        std::vector<BoundaryOwnerSample> boundary_samples;
+        boundary_samples.reserve(8);
+
+        const uint32_t world_width = _worldDimension.getWidth();
+        const uint32_t world_height = _worldDimension.getHeight();
+        const uint32_t left_x = x > 0 ? x - 1 : world_width - 1;
+        const uint32_t right_x = x + 1 < world_width ? x + 1 : 0;
+        const uint32_t top_y = y > 0 ? y - 1 : world_height - 1;
+        const uint32_t bottom_y = y + 1 < world_height ? y + 1 : 0;
+        const struct {
+            uint32_t nx;
+            uint32_t ny;
+            float weight;
+        } neighbors[] = {
+            {left_x, y, 1.0f},       {right_x, y, 1.0f},       {x, top_y, 1.0f},
+            {x, bottom_y, 1.0f},     {left_x, top_y, 0.65f},   {right_x, top_y, 0.65f},
+            {left_x, bottom_y, 0.65f}, {right_x, bottom_y, 0.65f},
+        };
+
+        for (const auto& neighbor : neighbors) {
+            const uint32_t neighbor_index = _worldDimension.indexOf(neighbor.nx, neighbor.ny);
+            const uint32_t owner = imap[neighbor_index];
+            float dir_x = 0.0f;
+            float dir_y = 0.0f;
+            neighbor_direction(neighbor.nx, neighbor.ny, dir_x, dir_y);
+            add_owner_sample(boundary_samples, owner, dir_x, dir_y, neighbor.weight);
+        }
+
+        float total_opening = 0.0f;
+        float owner_opening = 0.0f;
+        float drift_x = 0.0f;
+        float drift_y = 0.0f;
+        float drift_weight = 0.0f;
+
+        for (BoundaryOwnerSample& sample : boundary_samples) {
+            const float normal_length =
+                std::sqrt(sample.dir_x * sample.dir_x + sample.dir_y * sample.dir_y);
+            if (normal_length <= FLT_EPSILON) {
+                continue;
+            }
+
+            sample.dir_x /= normal_length;
+            sample.dir_y /= normal_length;
+
+            const Platec::FloatVector velocity = plates[sample.owner]->surfaceVelocityAt(x, y);
+            sample.velocity_x = velocity.x();
+            sample.velocity_y = velocity.y();
+            sample.retreat =
+                std::max(0.0f, -(sample.velocity_x * sample.dir_x + sample.velocity_y * sample.dir_y));
+            total_opening += sample.retreat;
+            if (sample.owner == imap[index]) {
+                owner_opening = sample.retreat;
+            }
+
+            const float weight = 0.2f + sample.retreat;
+            drift_x += sample.velocity_x * weight;
+            drift_y += sample.velocity_y * weight;
+            drift_weight += weight;
+        }
+
+        if (drift_weight > FLT_EPSILON) {
+            drift_x /= drift_weight;
+            drift_y /= drift_weight;
+        }
+
+        const float owner_share =
+            total_opening > FLT_EPSILON
+                ? owner_opening / total_opening
+                : (boundary_samples.empty() ? 1.0f : 1.0f / static_cast<float>(boundary_samples.size()));
+        const float opening_strength = 1.0f - std::exp(-total_opening * 1.45f);
+
+        const float time_phase = static_cast<float>(iter_count);
+        const float advected_x = static_cast<float>(x) + drift_x * time_phase * 2.4f;
+        const float advected_y = static_cast<float>(y) + drift_y * time_phase * 2.4f;
+        const float owner_seed = static_cast<float>(imap[index]);
+
+        const float flow_macro = scaled_octave_noise_4d(
+            4.0f, 0.56f, 0.070f, -1.0f, 1.0f, advected_x * 0.72f + owner_seed * 13.0f + 17.0f,
+            advected_y * 0.72f + owner_seed * 7.0f + 29.0f, time_phase * 0.040f,
+            owner_seed * 19.0f + 43.0f);
+        const float flow_detail = scaled_octave_noise_4d(
+            5.0f, 0.53f, 0.115f, -1.0f, 1.0f,
+            advected_x * 1.35f + drift_y * 11.0f + owner_seed * 5.0f + 37.0f,
+            advected_y * 1.35f - drift_x * 11.0f + owner_seed * 3.0f + 53.0f,
+            time_phase * 0.026f, owner_seed * 23.0f + 71.0f);
+        const float flow_pulse = scaled_octave_noise_4d(
+            3.0f, 0.50f, 0.160f, 0.0f, 1.0f, advected_x * 0.48f + owner_seed * 29.0f + 11.0f,
+            advected_y * 0.48f + owner_seed * 31.0f + 19.0f,
+            time_phase * 0.022f + total_opening * 0.30f, owner_seed * 41.0f + 97.0f);
+
+        const float flow_bias = clamp_unit(0.5f + 0.25f * flow_macro + 0.18f * flow_detail);
+        const float coherent_strength =
+            clamp_unit(0.20f + 0.32f * owner_share + 0.34f * opening_strength + 0.24f * flow_bias);
+        const float ridge_bias = flow_pulse * opening_strength;
+        const float generated_crust =
+            OCEANIC_BASE * (0.58f + 1.25f * coherent_strength + 0.55f * ridge_bias);
+        const float visual_ratio =
+            clamp_unit(0.08f + 0.58f * coherent_strength + 0.18f * ridge_bias);
+
+        hmap[index] = regenerated_floor + regenerated_visual_span * visual_ratio;
+        plates[imap[index]]->setCrust(x, y, generated_crust, iter_count);
+        ++plate_indices_found[imap[index]];
     };
 
     for (uint32_t index = 0; index < map_area; ++index) {

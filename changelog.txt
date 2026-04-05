@@ -5,6 +5,7 @@ V 1.5.0
   - added shared `uint16_t` metric topography codec and metric import API
   - example CLI now supports `--sea-level-m`, PNG16 input/output, `.r16` input/output, and sidecar metadata
   - preview rendering is now separate from authoritative metric data export
+  - procedurally seeded worlds now use a configurable initial metric range (`10000..30000 m` by default)
 * Added regression and round-trip coverage for the codec, PNG16, `.r16`, and bathymetry-aware generation
 
 V 1.4.4

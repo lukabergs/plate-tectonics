@@ -13,24 +13,12 @@ Layout
 - `img/out/`: timestamped final-state exports
 - `img/gif/`: generated GIFs
 - `img/frames/`: kept intermediate frames
-- `x64-Debug/`, `x64-Release/`: the only intended local build folders
+- `out/build/x64-Debug/`, `out/build/x64-Release/`: the only intended local build folders
 
 Build
 =====
 
-Use x64 Native Tools PowerShell for Visual Studio 2026:
-
-```powershell
-cmake --preset x64-debug
-cmake --build --preset build-x64-debug
-ctest --preset test-x64-debug
-```
-
-`x64-debug` intentionally uses `RelWithDebInfo`, not plain `Debug`, so runtime performance stays close to Release while PDB symbols remain available.
-
-The Windows presets expect vcpkg at `C:/dev/vcpkg` and use `vcpkg.json` for `libpng`.
-
-Manual commands are collected in `build_commands.txt`.
+See `BUILD_INSTRUCTIONS.md`. That file is the only supported build/test reference.
 
 Executables
 ===========
@@ -41,16 +29,16 @@ Executables
 Output Rules
 ============
 
-Each run gets one id: `<YYMMDDHHMM>_<SEED-or-INPUTIMGNAME>`.
+Each run gets one id: `<YYMMDDHHMMSS>_<SEED-or-INPUTIMGNAME>`.
 
 - Initial state: `img/in/<id>.r16` and `img/in/<id>.png`
 - Final state: `img/out/<id>.r16` and `img/out/<id>.png`
 - GIF: `img/gif/<id>.gif`
 - Frames: `img/frames/<id>_<NUMOFFRAME>.png`
-- Raw metric exports also write sidecars next to `.r16`: `.r16.json`
+- Raw metric exports also write sidecars next to both `.r16` and `.png`: `.r16.json` and `.png.json`
 - `--export-heightmap-f32` writes `img/out/<id>.f32` and `.f32.json`
 
-The `.r16` file is the canonical metric heightmap export. The `.png` file is the rendered preview image for the chosen display settings.
+The `.r16` file and the `.png` file are the authoritative metric heightmap exports. The `.png` file is 16-bit grayscale metric data, not a preview render. Human preview images are only written to `img/frames/` and into GIFs.
 
 Simulation Usage
 ================
@@ -58,7 +46,7 @@ Simulation Usage
 Example:
 
 ```powershell
-.\x64-Debug\bin\simulation.exe --dim 600 400 -s 12345 --gif --step 25
+.\out\build\x64-Debug\bin\simulation.exe --dim 600 400 -s 12345 --gif --step 25
 ```
 
 Arguments
@@ -74,8 +62,8 @@ Arguments
 - `--colors`: render preview PNGs/frames in color
 - `--grayscale`: render preview PNGs/frames in grayscale
 - `--no-output-normalization`: disable first-frame normalization for preview rendering
-- `--min-initial-height X`: remap the initial minimum height to `X` during preview normalization
-- `--max-initial-height X`: remap the initial maximum height to `X` during preview normalization
+- `--min-initial-height X`: minimum metric height used when procedurally seeding the initial world; default `10000`
+- `--max-initial-height X`: maximum metric height used when procedurally seeding the initial world; default `30000`
 - `--display-min X`: lower bound of the preview display window
 - `--display-max X`: upper bound of the preview display window
 - `--tone-map MODE`: preview tone mapping mode: `linear`, `log`, or `asinh`
@@ -95,13 +83,6 @@ Arguments
 - `--gif`: create a GIF in `img/gif/`; with `--step`, the GIF uses sampled frames, otherwise it uses every update
 - `--no-steps`: after GIF creation, delete the generated frame PNGs instead of keeping them
 - `--show-boundaries`: overlay convergent, divergent, and transform boundaries on preview PNGs, frames, and GIF frames
-
-Testing
-=======
-
-```powershell
-ctest --preset test-x64-debug
-```
 
 Code Quality
 ============

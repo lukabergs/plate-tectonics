@@ -44,6 +44,7 @@ static const float kErosionRedistributionStrength = 0.18f;
 static const float kReliefNoiseAmplitude = 0.02f;
 static const float kReliefNoiseVariation = 0.04f;
 static const float kErosionFloorOffset = 0.18f;
+static const float kMinRasterRotationAngle = 0.015f;
 
 float wrapped_delta(float point, float center, uint32_t world_size) {
     float delta = point - center;
@@ -78,6 +79,7 @@ plate::plate(long seed, float* m, uint32_t w, uint32_t h, uint32_t _x, uint32_t 
       _movement(_randsource, worldDimension, rotation_strength),
       _erosion_strength(erosion_strength < 0.0f ? 0.0f : erosion_strength),
       _crust_rotation_strength(crust_rotation_strength < 0.0f ? 0.0f : crust_rotation_strength),
+      _pending_crust_rotation(0.0f),
       _segments(nullptr), _mySegmentCreator(nullptr) {
     const uint32_t plate_area = w * h;
 
@@ -704,7 +706,8 @@ void plate::rotateCrust(float angle) {
                         static_cast<uint32_t>(ty) * width + static_cast<uint32_t>(tx);
                     const float contributed_crust = crust * weight;
                     rotated[dest_index] += contributed_crust;
-                    age_accumulator[dest_index] += contributed_crust * static_cast<float>(age_map[index]);
+                    age_accumulator[dest_index] +=
+                        contributed_crust * static_cast<float>(age_map[index]);
                 }
             }
         }
@@ -733,9 +736,10 @@ void plate::rotateCrust(float angle) {
 
 void plate::move() {
     _movement.move();
-    const float crust_rotation_angle = _movement.rotationAngle() * _crust_rotation_strength;
-    if (fabsf(crust_rotation_angle) >= 0.0001f) {
-        rotateCrust(crust_rotation_angle);
+    _pending_crust_rotation += _movement.rotationAngle() * _crust_rotation_strength;
+    if (fabsf(_pending_crust_rotation) >= kMinRasterRotationAngle) {
+        rotateCrust(_pending_crust_rotation);
+        _pending_crust_rotation = 0.0f;
     }
 
     // Location modulations into range [0..world width/height[ are a have to!

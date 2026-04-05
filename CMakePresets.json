@@ -25,20 +25,20 @@
     {
       "name": "x64-debug",
       "displayName": "x64-Debug",
-      "description": "Fast development build with symbols. Uses RelWithDebInfo on purpose.",
+      "description": "Fast development build with symbols in out/build/x64-Debug. Uses RelWithDebInfo on purpose.",
       "inherits": [
         "windows-base"
       ],
-      "binaryDir": "${sourceDir}/x64-Debug"
+      "binaryDir": "${sourceDir}/out/build/x64-Debug"
     },
     {
       "name": "x64-release",
       "displayName": "x64-Release",
-      "description": "Release build.",
+      "description": "Release build in out/build/x64-Release.",
       "inherits": [
         "windows-base"
       ],
-      "binaryDir": "${sourceDir}/x64-Release",
+      "binaryDir": "${sourceDir}/out/build/x64-Release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }

@@ -24,6 +24,7 @@
 
 #include "platecapi.hpp"
 #include "gtest/gtest.h"
+#include "lithosphere.hpp"
 #include "topography_codec.hpp"
 #include <cstdlib>
 #include <cstring>
@@ -198,17 +199,140 @@ TEST(Regression, InitialOceanBathymetryIsNotFlat) {
     platec_api_destroy(p);
 }
 
-TEST(Regression, SeaLevelOverrideChangesInitialClassification) {
-    const uint32_t width = 256;
-    const uint32_t height = 128;
+TEST(Regression, DivergentRegenerationIsVariedAndSmooth) {
+    lithosphere sim(12345, 128, 64, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10);
+    const float regenerated_floor = TopographyCodec::meters_to_internal(
+        TopographyCodec::kDefaultInitialMinHeightMeters, sim.getSeaLevelMeters());
+
+    bool observed_regeneration = false;
+    for (uint32_t step = 0; step < 48 && !observed_regeneration; ++step) {
+        sim.update();
+
+        const uint32_t newest_age = sim.getIterationCount() - 1;
+        const uint32_t width = sim.getWidth();
+        const uint32_t height = sim.getHeight();
+        const float* heightmap = sim.getTopography();
+        const uint32_t* agemap = sim.getAgeMap();
+
+        size_t regenerated_count = 0;
+        float regenerated_min = 0.0f;
+        float regenerated_max = 0.0f;
+        float adjacent_diff_sum = 0.0f;
+        float adjacent_diff_max = 0.0f;
+        size_t adjacent_pairs = 0;
+
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                const size_t index = static_cast<size_t>(y) * width + x;
+                if (agemap[index] != newest_age ||
+                    !TopographyCodec::is_oceanic_internal(heightmap[index])) {
+                    continue;
+                }
+
+                if (regenerated_count == 0) {
+                    regenerated_min = heightmap[index];
+                    regenerated_max = heightmap[index];
+                } else {
+                    regenerated_min = std::min(regenerated_min, heightmap[index]);
+                    regenerated_max = std::max(regenerated_max, heightmap[index]);
+                }
+                ++regenerated_count;
+
+                if (x + 1 < width) {
+                    const size_t right = index + 1;
+                    if (agemap[right] == newest_age &&
+                        TopographyCodec::is_oceanic_internal(heightmap[right])) {
+                        const float diff = std::fabs(heightmap[index] - heightmap[right]);
+                        adjacent_diff_sum += diff;
+                        adjacent_diff_max = std::max(adjacent_diff_max, diff);
+                        ++adjacent_pairs;
+                    }
+                }
+
+                if (y + 1 < height) {
+                    const size_t down = index + width;
+                    if (agemap[down] == newest_age &&
+                        TopographyCodec::is_oceanic_internal(heightmap[down])) {
+                        const float diff = std::fabs(heightmap[index] - heightmap[down]);
+                        adjacent_diff_sum += diff;
+                        adjacent_diff_max = std::max(adjacent_diff_max, diff);
+                        ++adjacent_pairs;
+                    }
+                }
+            }
+        }
+
+        if (regenerated_count >= 12 && adjacent_pairs >= 8) {
+            observed_regeneration = true;
+            EXPECT_GE(regenerated_min, regenerated_floor);
+            EXPECT_GT(regenerated_max - regenerated_min, 0.02f);
+            EXPECT_LT(adjacent_diff_sum / static_cast<float>(adjacent_pairs), 0.06f);
+            EXPECT_LT(adjacent_diff_max, 0.14f);
+        }
+    }
+
+    EXPECT_TRUE(observed_regeneration);
+}
+
+TEST(Regression, ProceduralInitialMetricRangeRespectsRequestedBounds) {
+    const uint32_t width = 192;
+    const uint32_t height = 96;
     const size_t map_size = static_cast<size_t>(width) * static_cast<size_t>(height);
+    const uint16_t min_height_m = 10000;
+    const uint16_t sea_level_m = 20000;
+    const uint16_t max_height_m = 30000;
+
+    void* p = platec_api_create(12345, width, height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10,
+                                1.0f, 0.0f, 1.0f, 1.0f, sea_level_m, min_height_m,
+                                max_height_m);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(sea_level_m, platec_api_get_sea_level_m(p));
+
+    const float* heightmap = platec_api_get_heightmap(p);
+    ASSERT_NE(heightmap, nullptr);
+
+    bool saw_ocean = false;
+    bool saw_land = false;
+    uint16_t observed_min = TopographyCodec::kMaxHeightMeters;
+    uint16_t observed_max = 0;
+    for (size_t i = 0; i < map_size; ++i) {
+        const uint16_t meters = TopographyCodec::internal_to_meters(heightmap[i], sea_level_m);
+        observed_min = std::min(observed_min, meters);
+        observed_max = std::max(observed_max, meters);
+        saw_ocean = saw_ocean || meters < sea_level_m;
+        saw_land = saw_land || meters >= sea_level_m;
+        EXPECT_GE(meters, min_height_m);
+        EXPECT_LE(meters, max_height_m);
+    }
+
+    EXPECT_TRUE(saw_ocean);
+    EXPECT_TRUE(saw_land);
+    EXPECT_LT(observed_min, sea_level_m);
+    EXPECT_GE(observed_max, sea_level_m);
+
+    platec_api_destroy(p);
+}
+
+TEST(Regression, MetricImportSeaLevelChangesClassification) {
+    const uint32_t width = 8;
+    const uint32_t height = 5;
+    const size_t map_size = static_cast<size_t>(width) * static_cast<size_t>(height);
+    const uint16_t row_samples[] = {5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000};
+    std::vector<uint16_t> metric_heightmap(map_size);
+    for (uint32_t y = 0; y < height; ++y) {
+        std::memcpy(metric_heightmap.data() + static_cast<size_t>(y) * width, row_samples,
+                    sizeof(row_samples));
+    }
 
     void* low = platec_api_create(12345, width, height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10,
-                                  1.0f, 0.0f, 1.0f, 1.0f, 12000);
+                                  1.0f, 0.0f, 1.0f, 1.0f);
     void* high = platec_api_create(12345, width, height, 0.65f, 60, 0.02f, 1000000, 0.33f, 2, 10,
-                                   1.0f, 0.0f, 1.0f, 1.0f, 50000);
+                                   1.0f, 0.0f, 1.0f, 1.0f);
     ASSERT_NE(low, nullptr);
     ASSERT_NE(high, nullptr);
+
+    platec_api_load_heightmap_u16(low, metric_heightmap.data(), 15000);
+    platec_api_load_heightmap_u16(high, metric_heightmap.data(), 30000);
 
     const float* low_map = platec_api_get_heightmap(low);
     const float* high_map = platec_api_get_heightmap(high);
@@ -222,8 +346,8 @@ TEST(Regression, SeaLevelOverrideChangesInitialClassification) {
         high_ocean_count += TopographyCodec::is_oceanic_internal(high_map[i]) ? 1U : 0U;
     }
 
-    EXPECT_EQ(static_cast<uint16_t>(12000), platec_api_get_sea_level_m(low));
-    EXPECT_EQ(static_cast<uint16_t>(50000), platec_api_get_sea_level_m(high));
+    EXPECT_EQ(static_cast<uint16_t>(15000), platec_api_get_sea_level_m(low));
+    EXPECT_EQ(static_cast<uint16_t>(30000), platec_api_get_sea_level_m(high));
     EXPECT_LT(low_ocean_count, high_ocean_count);
 
     platec_api_destroy(low);
@@ -293,36 +417,35 @@ TEST(Regression, SimulationSeed12345_OutputConsistency) {
     // Expected statistical properties from baseline runs with seed 12345
     // Initial state is identical across platforms (generated before simulation)
     HeightmapStats expected_initial = {
-        0.297476f,  // min
-        2.0f,       // max
-        0.845669f,  // mean
-        0.978199f,  // median
-        0.458341f,  // std_dev
-        0.319799f,  // q25
-        1.11317f    // q75
+        0.550022f,  // min
+        1.21961f,   // max
+        0.896703f,  // mean
+        0.819136f,  // median
+        0.168652f,  // std_dev
+        0.761488f,  // q25
+        1.10216f    // q75
     };
 
-    // Rotational motion and jagged divergent growth changed the seeded output materially.
     // Keep both architecture baselines aligned until a fresh ARM64 capture is available.
     HeightmapStats expected_final_arm64 = {
-        0.0880516f,  // min
-        25.6054f,    // max
-        0.974911f,   // mean
-        0.102054f,   // median
-        1.95106f,    // std_dev
-        0.0996732f,  // q25
-        1.17623f     // q75
+        0.0103608f,  // min
+        40.8962f,    // max
+        1.19402f,    // mean
+        0.144882f,   // median
+        2.59856f,    // std_dev
+        0.117956f,   // q25
+        1.15456f     // q75
     };
 
     // Baseline: Windows/Ubuntu x86-64 (MSVC/GCC, AVX2/SSE)
     HeightmapStats expected_final_x86 = {
-        0.0880516f,  // min
-        25.6054f,    // max
-        0.974911f,   // mean
-        0.102054f,   // median
-        1.95106f,    // std_dev
-        0.0996732f,  // q25
-        1.17623f     // q75
+        0.0103608f,  // min
+        40.8962f,    // max
+        1.19402f,    // mean
+        0.144882f,   // median
+        2.59856f,    // std_dev
+        0.117956f,   // q25
+        1.15456f     // q75
     };
 
     // Check initial state (should match on all platforms)

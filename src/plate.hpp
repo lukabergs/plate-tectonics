@@ -303,6 +303,7 @@ class plate : public IPlate {
     Movement _movement;
     float _erosion_strength;
     float _crust_rotation_strength;
+    float _pending_crust_rotation;
     ISegments* _segments;
     MySegmentCreator* _mySegmentCreator;
 };

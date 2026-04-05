@@ -86,7 +86,9 @@ class lithosphere {
                 float aggr_ratio_rel, uint32_t num_cycles, uint32_t _max_plates,
                 float erosion_strength = 1.0f, float crust_rotation_strength = 0.0f,
                 float rotation_strength = 1.0f, float subduction_strength = 1.0f,
-                int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride) noexcept(false);
+                int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride,
+                uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
+                uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -196,6 +198,8 @@ class lithosphere {
     float rotation_strength;   ///< Scales angular plate motion.
     float subduction_strength; ///< Scales oceanic crust removed during subduction.
     uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
+    uint16_t initial_min_height_m; ///< Lower bound for procedurally seeded metric topography.
+    uint16_t initial_max_height_m; ///< Upper bound for procedurally seeded metric topography.
 
     vector<vector<plateCollision>> collisions;
     vector<vector<plateCollision>> subductions;
