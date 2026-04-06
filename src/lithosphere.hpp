@@ -88,7 +88,8 @@ class lithosphere {
                 float rotation_strength = 1.0f, float subduction_strength = 1.0f,
                 int32_t sea_level_m_override = TopographyCodec::kNoSeaLevelOverride,
                 uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
-                uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters) noexcept(false);
+                uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters,
+                uint32_t cycle_step_limit = 600, float divergent_carve_strength = 0.015f) noexcept(false);
 
     ~lithosphere() noexcept; ///< Standard destructor.
 
@@ -179,6 +180,7 @@ class lithosphere {
     WorldPoint randomPosition();
 
     HeightMap hmap;              ///< Physical topography used by the simulation.
+    HeightMap prev_hmap;         ///< Previous step's physical topography.
     HeightMap display_hmap;      ///< Visual/export topography exposed via the public API.
     HeightMap prev_display_hmap; ///< Previous frame's visual/export topography.
     HeightMap initial_hmap;      ///< Initial topography before plates begin moving.
@@ -196,12 +198,14 @@ class lithosphere {
     float folding_ratio;       ///< Fraction [0, 1] of overlapping crust that's folded.
     uint32_t iter_count;       ///< Iteration count. Used to timestamp new crust.
     uint32_t max_cycles;       ///< Max n:o of times the system'll be restarted.
+    uint32_t cycle_step_limit; ///< Max number of updates before forcing a restart. 0 disables it.
     uint32_t max_plates;       ///< Number of plates in the initial setting.
     uint32_t num_plates;       ///< Number of plates in the current setting.
     float erosion_strength;    ///< Scales terrain erosion.
     float crust_rotation_strength; ///< Scales visible raster rotation.
     float rotation_strength;   ///< Scales angular plate motion.
     float subduction_strength; ///< Fraction [0, 1] of oceanic crust removed during subduction.
+    float divergent_carve_strength; ///< Downward step applied when regenerating divergent crust.
     uint16_t sea_level_m;      ///< Coastline threshold in metric export space.
     uint16_t initial_min_height_m; ///< Lower bound for procedurally seeded metric topography.
     uint16_t initial_max_height_m; ///< Upper bound for procedurally seeded metric topography.

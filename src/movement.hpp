@@ -80,7 +80,7 @@ class Movement : public IMovement {
     float velY() const throw() {
         return vy;
     }
-    void collide(const IMass& thisMass, IPlate& p, float coll_mass);
+    void collide(const IPlate& thisPlate, IPlate& p, float coll_mass);
     void decDx(float delta) {
         dx -= delta;
     }

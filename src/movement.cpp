@@ -22,6 +22,20 @@
 #include "plate.hpp"
 #include "utils.hpp"
 
+namespace {
+
+float wrapped_delta(float value, float reference, float period) {
+    float delta = value - reference;
+    if (delta > period * 0.5f) {
+        delta -= period;
+    } else if (delta < -period * 0.5f) {
+        delta += period;
+    }
+    return delta;
+}
+
+} // namespace
+
 Movement::Movement(SimpleRandom randsource, const WorldDimension& worldDimension,
                    float rotation_strength)
     : _randsource(randsource), _worldDimension(worldDimension),
@@ -107,12 +121,22 @@ float Movement::momentum(const Mass& mass) const throw() {
     return mass.getMass() * velocity;
 }
 
-void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mass) {
+void Movement::collide(const IPlate& thisPlate, IPlate& otherPlate, float coll_mass) {
     const float coeff_rest = 0.0; // Coefficient of restitution.
     // 1 = fully elastic, 0 = stick together.
-    Platec::IntVector massCentersDistance =
-        otherPlate.massCenter().toInt() - thisMass.massCenter().toInt();
-    float distance = massCentersDistance.length();
+    if (thisPlate.getMass() <= 0.0f || otherPlate.getMass() <= 0.0f || coll_mass <= 0.0f) {
+        return;
+    }
+
+    const FloatPoint this_center = thisPlate.worldMassCenter();
+    const FloatPoint other_center = otherPlate.worldMassCenter();
+    const float delta_x =
+        wrapped_delta(other_center.getX(), this_center.getX(),
+                      static_cast<float>(_worldDimension.getWidth()));
+    const float delta_y =
+        wrapped_delta(other_center.getY(), this_center.getY(),
+                      static_cast<float>(_worldDimension.getHeight()));
+    const float distance = std::sqrt(delta_x * delta_x + delta_y * delta_y);
     if (distance <= 0) {
         return; // Avoid division by zero!
     }
@@ -120,8 +144,7 @@ void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mas
     // Scaling is required at last when impulses are added to plates!
     // Compute relative velocity between plates at the collision point.
     // Because torque is not included, calc simplifies to v_ab = v_a - v_b.
-    Platec::FloatVector collisionDirection =
-        Platec::FloatVector(massCentersDistance.x() / distance, massCentersDistance.y() / distance);
+    Platec::FloatVector collisionDirection(delta_x / distance, delta_y / distance);
     Platec::FloatVector relativeVelocity = velocityUnitVector() - otherPlate.velocityUnitVector();
 
     // Get the dot product of relative velocity vector and collision vector.
@@ -145,7 +168,7 @@ void Movement::collide(const IMass& thisMass, IPlate& otherPlate, float coll_mas
     // Compute final change of trajectory.
     // The plate that is the "giver" of the impulse should receive a
     // force according to its pre-collision mass, not the current mass!
-    addImpulse(collisionDirection * (J / thisMass.getMass()));
+    addImpulse(collisionDirection * (J / thisPlate.getMass()));
     otherPlate.decImpulse(collisionDirection * (J / (coll_mass + otherPlate.getMass())));
 
     // In order to prove that the code above works correctly, here is an

@@ -85,6 +85,49 @@ TEST(CreatePlate, NotSquareDoesNotExplode)
     plate p = plate(123, heightmap, 100, 3, 50, 23, 18, WorldDimension(200, 400));
 }
 
+TEST(Plate, ClassifiesOceanicAndContinentalTypes)
+{
+    constexpr uint32_t width = 8;
+    constexpr uint32_t height = 8;
+    float *oceanicMap = new float[width * height];
+    float *continentalMap = new float[width * height];
+
+    for (uint32_t i = 0; i < width * height; ++i) {
+        oceanicMap[i] = 0.18f;
+        continentalMap[i] = i < (width * height) / 2 ? 1.25f : 0.12f;
+    }
+
+    plate oceanic = plate(11, oceanicMap, width, height, 0, 0, 1, WorldDimension(64, 64));
+    plate continental =
+        plate(22, continentalMap, width, height, 16, 16, 1, WorldDimension(64, 64));
+
+    EXPECT_TRUE(oceanic.isOceanicPlate());
+    EXPECT_TRUE(continental.isContinentalPlate());
+    EXPECT_GT(continental.buoyancy(), oceanic.buoyancy());
+}
+
+TEST(Plate, OceanicBuoyancyTracksRelativeLightness)
+{
+    constexpr uint32_t width = 8;
+    constexpr uint32_t height = 8;
+    float *deepOceanMap = new float[width * height];
+    float *lightOceanMap = new float[width * height];
+
+    for (uint32_t i = 0; i < width * height; ++i) {
+        deepOceanMap[i] = 0.08f;
+        lightOceanMap[i] = 0.22f;
+    }
+
+    plate deepOcean =
+        plate(33, deepOceanMap, width, height, 0, 0, 1, WorldDimension(64, 64));
+    plate lightOcean =
+        plate(44, lightOceanMap, width, height, 20, 20, 1, WorldDimension(64, 64));
+
+    EXPECT_TRUE(deepOcean.isOceanicPlate());
+    EXPECT_TRUE(lightOcean.isOceanicPlate());
+    EXPECT_GT(lightOcean.buoyancy(), deepOcean.buoyancy());
+}
+
 // TODO test also when plate is large as world
 TEST(Plate, calculateCrust)
 {

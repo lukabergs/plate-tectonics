@@ -136,21 +136,27 @@ TEST(Movement, Dot)
 class MockPlate : public IPlate {
 public:
     MockPlate(const FloatVector& velocityUnitVector, float mass, const FloatPoint& massCenter)
+        : MockPlate(velocityUnitVector, mass, massCenter, massCenter)
+    { }
+
+    MockPlate(const FloatVector& velocityUnitVector, float mass, const FloatPoint& massCenter,
+              const FloatPoint& worldMassCenter)
         : _velocityUnitVector(velocityUnitVector),
           _decImpulseDelta(nullptr),
           _mass(mass),
-          _massCenter(massCenter)
+          _massCenter(massCenter),
+          _worldMassCenter(worldMassCenter)
     { }
 
     ~MockPlate() {
         if (_decImpulseDelta) delete _decImpulseDelta;
     }
 
-    FloatVector velocityUnitVector() const {
+    FloatVector velocityUnitVector() const override {
         return _velocityUnitVector;
     }
 
-    void decImpulse(const FloatVector& delta) {
+    void decImpulse(const FloatVector& delta) override {
         _decImpulseDelta = new FloatVector(delta);
     }
 
@@ -159,12 +165,16 @@ public:
         return *_decImpulseDelta;
     }
 
-    float getMass() const {
+    float getMass() const override {
         return _mass;
     }
 
-    FloatPoint massCenter() const {
+    FloatPoint massCenter() const override {
         return _massCenter;
+    }
+
+    FloatPoint worldMassCenter() const override {
+        return _worldMassCenter;
     }
 
 private:
@@ -172,6 +182,7 @@ private:
     FloatVector* _decImpulseDelta;
     float _mass;
     FloatPoint _massCenter;
+    FloatPoint _worldMassCenter;
 };
 
 TEST(Movement, Collide)
@@ -184,14 +195,30 @@ TEST(Movement, Collide)
     EXPECT_FLOAT_EQ(-0.95583719f, mov.velY());
     EXPECT_FLOAT_EQ(1.0f, mov.getVelocity());
 
-    Mass thisMass(100.0, 70.0, 90.0);
+    MockPlate thisPlate(FloatVector(mov.velX(), mov.velY()), 100.0f, FloatPoint(70.0f, 90.0f));
     FloatVector otherPlateVelocityUnitVector(0.0f, -1.0f);
     float otherPlateMass = 10000.0f;
-    FloatPoint otherPlateMassCenter(100.0f, 400.0f);
+    FloatPoint otherPlateMassCenter(20.0f, 120.0f);
     MockPlate otherPlate(otherPlateVelocityUnitVector, otherPlateMass, otherPlateMassCenter);
-    mov.collide(thisMass, otherPlate, 456.2f);
+    mov.collide(thisPlate, otherPlate, 456.2f);
 
-    // Updated expected values for float-only math (no double intermediate precision)
-    EXPECT_FLOAT_EQ(-6.2893458e-05f, otherPlate.decImpulseDelta().x());
-    EXPECT_FLOAT_EQ(-0.00064989907f, otherPlate.decImpulseDelta().y());
+    EXPECT_FLOAT_EQ(0.0098300017f, otherPlate.decImpulseDelta().x());
+    EXPECT_FLOAT_EQ(-0.0058980011f, otherPlate.decImpulseDelta().y());
+}
+
+TEST(Movement, CollideWrapsWorldMassCenter)
+{
+    SimpleRandom sr(123);
+    WorldDimension wd(100, 60);
+    Movement mov(sr, wd);
+
+    MockPlate thisPlate(FloatVector(mov.velX(), mov.velY()), 100.0f, FloatPoint(8.0f, 12.0f),
+                        FloatPoint(98.0f, 20.0f));
+    MockPlate otherPlate(FloatVector(-1.0f, 0.0f), 1000.0f, FloatPoint(4.0f, 9.0f),
+                         FloatPoint(2.0f, 20.0f));
+
+    mov.collide(thisPlate, otherPlate, 250.0f);
+
+    EXPECT_LT(otherPlate.decImpulseDelta().x(), -0.001f);
+    EXPECT_LT(std::fabs(otherPlate.decImpulseDelta().y()), std::fabs(otherPlate.decImpulseDelta().x()));
 }

@@ -44,7 +44,8 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
                         float erosion_strength, float crust_rotation_strength,
                         float rotation_strength, float subduction_strength,
                         int32_t sea_level_m, uint16_t initial_min_height_m,
-                        uint16_t initial_max_height_m) {
+                        uint16_t initial_max_height_m, uint32_t cycle_step_limit,
+                        float divergent_carve_strength) {
     /* Miten nykyisen opengl-mainin koodit refaktoroidaan tänne?
      *    parametrien tarkistus, kommentit eli dokumentointi, muuta? */
 
@@ -53,7 +54,7 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
                         aggr_overlap_abs, aggr_overlap_rel, cycle_count, num_plates,
                         erosion_strength, crust_rotation_strength, rotation_strength,
                         subduction_strength, sea_level_m, initial_min_height_m,
-                        initial_max_height_m);
+                        initial_max_height_m, cycle_step_limit, divergent_carve_strength);
 
     platec_api_list_elem elem(++last_id, litho);
     lithospheres.push_back(elem);

@@ -31,7 +31,8 @@ void* platec_api_create(long seed, uint32_t width, uint32_t height, float sea_le
                         float rotation_strength = 1.0f, float subduction_strength = 1.0f,
                         int32_t sea_level_m = -1,
                         uint16_t initial_min_height_m = TopographyCodec::kDefaultInitialMinHeightMeters,
-                        uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters);
+                        uint16_t initial_max_height_m = TopographyCodec::kDefaultInitialMaxHeightMeters,
+                        uint32_t cycle_step_limit = 600, float divergent_carve_strength = 0.015f);
 
 void platec_api_destroy(void*);
 const uint32_t* platec_api_get_agemap(uint32_t);

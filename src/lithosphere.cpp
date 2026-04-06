@@ -44,7 +44,6 @@ static const float MULINV_MAX_BUOYANCY_AGE = 1.0f / (float)MAX_BUOYANCY_AGE;
 
 static const float RESTART_ENERGY_RATIO = 0.15f;
 static const float RESTART_SPEED_LIMIT = 2.0f;
-static const uint32_t RESTART_ITERATIONS = 600;
 static const uint32_t NO_COLLISION_TIME_LIMIT = 10;
 
 uint32_t findBound(const uint32_t* map, uint32_t length, uint32_t x0, uint32_t y0, int dx, int dy);
@@ -96,8 +95,27 @@ FractalNoiseConfig make_noise_config(SimpleRandom& randsource, float octaves, fl
     };
 }
 
-float sample_toroidal_noise(float x, float y, const WorldDimension& dimension,
-                            const FractalNoiseConfig& config) {
+float clamp_unit(float value) {
+    return std::max(0.0f, std::min(1.0f, value));
+}
+
+float interpolate(float start, float end, float alpha) {
+    return start + (end - start) * clamp_unit(alpha);
+}
+
+float smoothstep(float edge0, float edge1, float value) {
+    if (std::fabs(edge1 - edge0) <= FLT_EPSILON) {
+        return value >= edge1 ? 1.0f : 0.0f;
+    }
+    const float t = clamp_unit((value - edge0) / (edge1 - edge0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
+float sample_wrapped_octave_noise(float x, float y, const WorldDimension& dimension,
+                                  float octaves, float persistence, float scale,
+                                  float noise_scale, float lo_bound, float hi_bound,
+                                  float offset_a, float offset_b, float offset_c,
+                                  float offset_d) {
     const float width = static_cast<float>(dimension.getWidth());
     const float height = static_cast<float>(dimension.getHeight());
     const float wrapped_x = wrap_coordinate(x, width) / width;
@@ -109,19 +127,23 @@ float sample_toroidal_noise(float x, float y, const WorldDimension& dimension,
     const float sin_phi = std::sin(phi);
     const float cos_phi = std::cos(phi);
 
-    return scaled_octave_noise_4d(config.octaves, config.persistence, config.scale, -1.0f, 1.0f,
-                                  config.offset_a + sin_theta * config.noise_scale,
-                                  config.offset_b + cos_theta * config.noise_scale,
-                                  config.offset_c + sin_phi * config.noise_scale,
-                                  config.offset_d + cos_phi * config.noise_scale);
+    return scaled_octave_noise_4d(octaves, persistence, scale, lo_bound, hi_bound,
+                                  offset_a + sin_theta * noise_scale,
+                                  offset_b + cos_theta * noise_scale,
+                                  offset_c + sin_phi * noise_scale,
+                                  offset_d + cos_phi * noise_scale);
+}
+
+float sample_toroidal_noise(float x, float y, const WorldDimension& dimension,
+                            const FractalNoiseConfig& config) {
+    return sample_wrapped_octave_noise(x, y, dimension, config.octaves, config.persistence,
+                                       config.scale, config.noise_scale, -1.0f, 1.0f,
+                                       config.offset_a, config.offset_b, config.offset_c,
+                                       config.offset_d);
 }
 
 float logistic(float value, float sharpness) {
     return 1.0f / (1.0f + std::exp(-value * sharpness));
-}
-
-float clamp_unit(float value) {
-    return std::max(0.0f, std::min(1.0f, value));
 }
 
 float remap_to_range(float value, float min_value, float max_value, float target_min,
@@ -177,18 +199,20 @@ lithosphere::lithosphere(long seed, uint32_t width, uint32_t height, float sea_l
                          float _erosion_strength, float _crust_rotation_strength,
                          float _rotation_strength, float _subduction_strength,
                          int32_t sea_level_m_override, uint16_t _initial_min_height_m,
-                         uint16_t _initial_max_height_m) noexcept(false)
-    : hmap(width, height), display_hmap(width, height), prev_display_hmap(width, height),
-      initial_hmap(width, height), imap(width, height), prev_imap(width, height),
+                         uint16_t _initial_max_height_m, uint32_t _cycle_step_limit,
+                         float _divergent_carve_strength) noexcept(false)
+    : hmap(width, height), prev_hmap(width, height), display_hmap(width, height),
+      prev_display_hmap(width, height), initial_hmap(width, height), imap(width, height), prev_imap(width, height),
       amap(width, height), plates(nullptr), plate_areas(_max_plates),
       plate_indices_found(_max_plates),
       aggr_overlap_abs(aggr_ratio_abs), aggr_overlap_rel(clamp_unit(aggr_ratio_rel)), cycle_count(0),
       erosion_period(_erosion_period), folding_ratio(clamp_unit(_folding_ratio)), iter_count(0),
-      max_cycles(num_cycles), max_plates(_max_plates), num_plates(0),
+      max_cycles(num_cycles), cycle_step_limit(_cycle_step_limit), max_plates(_max_plates), num_plates(0),
       erosion_strength(_erosion_strength < 0.0f ? 0.0f : _erosion_strength),
       crust_rotation_strength(_crust_rotation_strength < 0.0f ? 0.0f : _crust_rotation_strength),
       rotation_strength(_rotation_strength < 0.0f ? 0.0f : _rotation_strength),
       subduction_strength(clamp_unit(_subduction_strength)),
+      divergent_carve_strength(_divergent_carve_strength < 0.0f ? 0.0f : _divergent_carve_strength),
       sea_level_m(TopographyCodec::legacy_raw_sea_level_m()),
       initial_min_height_m(_initial_min_height_m),
       initial_max_height_m(_initial_max_height_m),
@@ -437,15 +461,18 @@ void lithosphere::jaggedizePlateBoundaries() {
                         }
                     }
 
-                    const float owner_bias = scaled_octave_noise_4d(
-                        4.0f, 0.57f, 0.10f, -1.0f, 1.0f,
-                        static_cast<float>(x) * 0.9f + static_cast<float>(candidate) * 13.0f + 17.0f,
-                        static_cast<float>(y) * 0.9f + static_cast<float>(candidate) * 7.0f + 29.0f,
-                        static_cast<float>(pass) * 0.37f, static_cast<float>(candidate) * 19.0f + 11.0f);
-                    const float warp_bias = scaled_octave_noise_4d(
-                        2.0f, 0.50f, 0.23f, -1.0f, 1.0f,
-                        static_cast<float>(x) * 1.75f + 5.0f, static_cast<float>(y) * 1.75f + 13.0f,
-                        static_cast<float>(candidate) * 0.41f, static_cast<float>(pass) * 3.0f + 43.0f);
+                    const float owner_bias = sample_wrapped_octave_noise(
+                        static_cast<float>(x), static_cast<float>(y), _worldDimension, 4.0f,
+                        0.57f, 0.10f, 1.9f, -1.0f, 1.0f,
+                        static_cast<float>(candidate) * 13.0f + 17.0f,
+                        static_cast<float>(candidate) * 7.0f + 29.0f,
+                        static_cast<float>(pass) * 0.37f,
+                        static_cast<float>(candidate) * 19.0f + 11.0f);
+                    const float warp_bias = sample_wrapped_octave_noise(
+                        static_cast<float>(x), static_cast<float>(y), _worldDimension, 2.0f,
+                        0.50f, 0.23f, 2.5f, -1.0f, 1.0f, 5.0f, 13.0f,
+                        static_cast<float>(candidate) * 0.41f,
+                        static_cast<float>(pass) * 3.0f + 43.0f);
                     score += owner_bias * 1.15f + warp_bias * 0.75f;
 
                     if (score > best_score) {
@@ -572,6 +599,7 @@ void lithosphere::resetSimulationState() {
     amap.set_all(0);
     imap.set_all(0xFFFFFFFF);
     prev_imap.set_all(0xFFFFFFFF);
+    prev_hmap = hmap;
     prev_display_hmap = display_hmap;
 
     for (uint32_t i = 0; i < max_plates; ++i) {
@@ -598,6 +626,7 @@ void lithosphere::initializeHeightMapFromMetric(const uint16_t* heightmap_m, uin
     for (uint32_t i = 0; i < map_area; ++i) {
         hmap[i] = TopographyCodec::meters_to_internal(heightmap_m[i], sea_level_m);
     }
+    prev_hmap = hmap;
     display_hmap = hmap;
     prev_display_hmap = display_hmap;
     initial_hmap = hmap;
@@ -696,24 +725,33 @@ void lithosphere::seedInitialTopography(float ocean_coverage, int32_t sea_level_
             const float trench = 1.0f - std::abs(sample_toroidal_noise(sample_x * 2.35f, sample_y * 2.35f,
                                                                        _worldDimension, trench_noise));
             const float distance_to_coast = continentality[index] - continent_threshold;
+            const float coastal_transition =
+                smoothstep(0.010f, 0.110f, std::abs(distance_to_coast));
+            const float shoreline_profile =
+                0.09f * std::tanh(distance_to_coast * 18.0f) + 0.07f * detail + 0.05f * shelf +
+                0.04f * land_detail + 0.06f * ridge - 0.06f * trench + 0.03f * foothills;
 
             if (distance_to_coast >= 0.0f) {
                 is_land[index] = 1U;
                 const float inland_bias = logistic(distance_to_coast + 0.05f * land_detail, 8.0f);
                 const float coastal_bias = 1.0f - inland_bias;
-                raw_height[index] = 0.34f * inland_bias - 0.08f * coastal_bias +
-                                    0.18f * detail + 0.19f * land_detail + 0.15f * foothills +
-                                    0.17f * mountains + 0.10f * ridge - 0.05f * trench +
-                                    0.04f * shelf;
+                const float inland_profile =
+                    0.34f * inland_bias - 0.08f * coastal_bias + 0.18f * detail +
+                    0.19f * land_detail + 0.15f * foothills + 0.17f * mountains +
+                    0.10f * ridge - 0.05f * trench + 0.04f * shelf;
+                raw_height[index] =
+                    interpolate(shoreline_profile, inland_profile, coastal_transition);
                 raw_land_min = std::min(raw_land_min, raw_height[index]);
                 raw_land_max = std::max(raw_land_max, raw_height[index]);
             } else {
                 const float shelf_weight = logistic(distance_to_coast + 0.10f * shelf + 0.05f, 11.0f);
                 const float abyss_weight = 1.0f - shelf_weight;
-                raw_height[index] = -0.62f * abyss_weight - 0.16f * shelf_weight +
-                                    0.17f * sea_base + 0.15f * sea_detail + 0.09f * sea_micro +
-                                    0.08f * shelf + 0.17f * ridge - 0.27f * trench +
-                                    0.04f * detail;
+                const float ocean_profile =
+                    -0.62f * abyss_weight - 0.16f * shelf_weight + 0.17f * sea_base +
+                    0.15f * sea_detail + 0.09f * sea_micro + 0.08f * shelf + 0.17f * ridge -
+                    0.27f * trench + 0.04f * detail;
+                raw_height[index] =
+                    interpolate(shoreline_profile, ocean_profile, coastal_transition);
                 raw_ocean_min = std::min(raw_ocean_min, raw_height[index]);
                 raw_ocean_max = std::max(raw_ocean_max, raw_height[index]);
             }
@@ -776,6 +814,7 @@ void lithosphere::importNormalizedHeightMap(const float* normalized_map, float s
     for (uint32_t i = 0; i < map_area; ++i) {
         hmap[i] = TopographyCodec::normalized_to_internal(normalized_map[i], sea_threshold);
     }
+    prev_hmap = hmap;
     display_hmap = hmap;
     prev_display_hmap = display_hmap;
     initial_hmap = hmap;
@@ -819,40 +858,38 @@ void lithosphere::resolveJuxtapositions(const uint32_t& i, const uint32_t& j, co
                                         const float*& this_map, const uint32_t*& this_age,
                                         uint32_t& continental_collisions) {
     ASSERT(i < num_plates, "Given invalid plate index");
-
-    // Record collisions to both plates. This also creates
-    // continent segment at the collided location to plates.
-    uint32_t this_area = plates[i]->addCollision(x_mod, y_mod);
-    uint32_t prev_area = plates[imap[k]]->addCollision(x_mod, y_mod);
-
-    if (this_area < prev_area) {
-        plateCollision coll(imap[k], x_mod, y_mod, this_map[j] * folding_ratio);
-
-        // Give some...
-        hmap[k] += coll.crust;
-        plates[imap[k]]->setCrust(x_mod, y_mod, hmap[k], this_age[j]);
-
-        // And take some.
-        plates[i]->setCrust(x_mod, y_mod, this_map[j] * (1.0f - folding_ratio), this_age[j]);
-
-        // Add collision to the earlier plate's list.
-        collisions[i].push_back(coll);
-        ++continental_collisions;
-    } else {
-        plateCollision coll(i, x_mod, y_mod, hmap[k] * folding_ratio);
-
-        plates[i]->setCrust(x_mod, y_mod, this_map[j] + coll.crust, amap[k]);
-
-        plates[imap[k]]->setCrust(x_mod, y_mod, hmap[k] * (1.0f - folding_ratio), amap[k]);
-
-        collisions[imap[k]].push_back(coll);
-        ++continental_collisions;
-
-        // Give the location to the larger plate.
-        hmap[k] = this_map[j];
-        imap[k] = i;
-        amap[k] = this_age[j];
+    const uint32_t current_owner = imap[k];
+    uint32_t surface_owner = current_owner;
+    if (prev_imap[k] == i || prev_imap[k] == current_owner) {
+        surface_owner = prev_imap[k];
     }
+    const uint32_t penetrating_owner = surface_owner == i ? current_owner : i;
+
+    plates[surface_owner]->addCollision(x_mod, y_mod);
+    plates[penetrating_owner]->addCollision(x_mod, y_mod);
+
+    const float surface_height = surface_owner == current_owner ? hmap[k] : this_map[j];
+    const uint32_t surface_age = surface_owner == current_owner ? amap[k] : this_age[j];
+    const float penetrating_height =
+        penetrating_owner == current_owner ? hmap[k] : this_map[j];
+    const uint32_t penetrating_age =
+        penetrating_owner == current_owner ? amap[k] : this_age[j];
+
+    const float folded_crust = std::min(surface_height, penetrating_height) * folding_ratio;
+    const float uplifted_surface = surface_height + folded_crust;
+    const float remaining_penetrating = std::max(0.0f, penetrating_height - folded_crust);
+
+    plates[surface_owner]->setCrust(x_mod, y_mod, uplifted_surface,
+                                    std::max(surface_age, penetrating_age));
+    plates[penetrating_owner]->setCrust(x_mod, y_mod, remaining_penetrating, penetrating_age);
+
+    hmap[k] = uplifted_surface;
+    imap[k] = surface_owner;
+    amap[k] = plates[surface_owner]->getCrustTimestamp(x_mod, y_mod);
+
+    collisions[penetrating_owner].push_back(
+        plateCollision(surface_owner, x_mod, y_mod, folded_crust));
+    ++continental_collisions;
 }
 
 // Update height and plate index maps.
@@ -904,68 +941,93 @@ void lithosphere::updateHeightAndPlateIndexMaps(uint32_t& oceanic_collisions,
                     continue;
                 }
 
-                // DO NOT ACCEPT HEIGHT EQUALITY! Equality leads to subduction
-                // of shore that 's barely above sea level. It's a lot less
-                // serious problem to treat very shallow waters as continent...
-                const bool prev_is_oceanic = isOceanic(hmap[k]);
-                const bool this_is_oceanic = isOceanic(this_map[j]);
+                const uint32_t current_owner = imap[k];
+                const float current_height = hmap[k];
+                const uint32_t current_age = amap[k];
+                const float incoming_height = this_map[j];
+                const uint32_t incoming_age = this_age[j];
+                plate& current_plate = *plates[current_owner];
+                plate& incoming_plate = *plates[i];
 
-                const uint32_t prev_timestamp = plates[imap[k]]->getCrustTimestamp(x_mod, y_mod);
-                const uint32_t this_timestamp = this_age[j];
-                const bool prev_is_buoyant =
-                    (hmap[k] > this_map[j]) || ((hmap[k] + 2 * FLT_EPSILON > this_map[j]) &&
-                                                (hmap[k] < 2 * FLT_EPSILON + this_map[j]) &&
-                                                (prev_timestamp >= this_timestamp));
-
-                // Handle subduction of oceanic crust as special case.
-                if (this_is_oceanic && prev_is_buoyant) {
-                    // This plate will be the subducting one.
-                    // The level of effect that subduction has
-                    // is directly related to the amount of water
-                    // on top of the subducting plate.
-                    const float subducted_crust = OCEANIC_BASE * subduction_strength;
-                    const float sediment = SUBDUCT_RATIO * subducted_crust *
-                                           (CONTINENTAL_BASE - this_map[j]) / CONTINENTAL_BASE;
-
-                    // Save collision to the receiving plate's list.
-                    plateCollision coll(i, x_mod, y_mod, sediment);
-                    subductions[imap[k]].push_back(coll);
-                    ++oceanic_collisions;
-
-                    // Remove subducted oceanic lithosphere from plate.
-                    // This is crucial for
-                    // a) having correct amount of colliding crust (below)
-                    // b) protecting subducted locations from receiving
-                    //    crust from other subductions/collisions.
-                    plates[i]->setCrust(x_mod, y_mod, this_map[j] - subducted_crust,
-                                        this_timestamp);
-
-                    if (this_map[j] <= 0)
-                        continue; // Nothing more to collide.
-                } else if (prev_is_oceanic) {
-                    const float subducted_crust = OCEANIC_BASE * subduction_strength;
-                    const float sediment = SUBDUCT_RATIO * subducted_crust *
-                                           (CONTINENTAL_BASE - hmap[k]) / CONTINENTAL_BASE;
-
-                    plateCollision coll(imap[k], x_mod, y_mod, sediment);
-                    subductions[i].push_back(coll);
-                    ++oceanic_collisions;
-
-                    plates[imap[k]]->setCrust(x_mod, y_mod, hmap[k] - subducted_crust,
-                                              prev_timestamp);
-                    hmap[k] -= subducted_crust;
-
-                    if (hmap[k] <= 0) {
-                        imap[k] = i;
-                        hmap[k] = this_map[j];
-                        amap[k] = this_age[j];
-
-                        continue;
-                    }
+                if (current_plate.isContinentalPlate() && incoming_plate.isContinentalPlate()) {
+                    resolveJuxtapositions(i, j, k, x_mod, y_mod, this_map, this_age,
+                                          continental_collisions);
+                    continue;
                 }
 
-                resolveJuxtapositions(i, j, k, x_mod, y_mod, this_map, this_age,
-                                      continental_collisions);
+                uint32_t overriding_owner = current_owner;
+                uint32_t subducting_owner = i;
+
+                if (current_plate.isOceanicPlate() && incoming_plate.isOceanicPlate()) {
+                    const float current_buoyancy = current_plate.buoyancy();
+                    const float incoming_buoyancy = incoming_plate.buoyancy();
+                    if (incoming_buoyancy > current_buoyancy + FLT_EPSILON ||
+                        (std::fabs(incoming_buoyancy - current_buoyancy) <= FLT_EPSILON &&
+                         (incoming_height > current_height + FLT_EPSILON ||
+                          (std::fabs(incoming_height - current_height) <= FLT_EPSILON &&
+                           incoming_age >= current_age)))) {
+                        overriding_owner = i;
+                        subducting_owner = current_owner;
+                    }
+                } else if (current_plate.isContinentalPlate()) {
+                    overriding_owner = current_owner;
+                    subducting_owner = i;
+                } else {
+                    overriding_owner = i;
+                    subducting_owner = current_owner;
+                }
+
+                const float overriding_height =
+                    overriding_owner == current_owner ? current_height : incoming_height;
+                const uint32_t overriding_age =
+                    overriding_owner == current_owner ? current_age : incoming_age;
+                const float subducting_height =
+                    subducting_owner == current_owner ? current_height : incoming_height;
+                const uint32_t subducting_age =
+                    subducting_owner == current_owner ? current_age : incoming_age;
+                const float subducted_crust =
+                    std::min(subducting_height, OCEANIC_BASE * subduction_strength);
+
+                if (subducted_crust <= FLT_EPSILON) {
+                    resolveJuxtapositions(i, j, k, x_mod, y_mod, this_map, this_age,
+                                          continental_collisions);
+                    continue;
+                }
+
+                current_plate.addCollision(x_mod, y_mod);
+                incoming_plate.addCollision(x_mod, y_mod);
+
+                const float convergence_fold_scale =
+                    current_plate.isOceanicPlate() && incoming_plate.isOceanicPlate() ? 0.75f : 1.0f;
+                const float folded_crust =
+                    std::min(overriding_height, subducting_height) * folding_ratio *
+                    convergence_fold_scale;
+                const float sediment =
+                    SUBDUCT_RATIO * subducted_crust *
+                    (CONTINENTAL_BASE - std::min(subducting_height, CONTINENTAL_BASE)) /
+                    CONTINENTAL_BASE;
+                const float uplifted_overriding =
+                    overriding_height + folded_crust + sediment * 0.5f;
+                const float remaining_subducting =
+                    std::max(0.0f, subducting_height - subducted_crust);
+
+                plates[overriding_owner]->setCrust(
+                    x_mod, y_mod, uplifted_overriding,
+                    std::max(overriding_age, subducting_age));
+                plates[subducting_owner]->setCrust(x_mod, y_mod, remaining_subducting,
+                                                   subducting_age);
+
+                hmap[k] = uplifted_overriding;
+                imap[k] = overriding_owner;
+                amap[k] = plates[overriding_owner]->getCrustTimestamp(x_mod, y_mod);
+
+                subductions[overriding_owner].push_back(
+                    plateCollision(subducting_owner, x_mod, y_mod, sediment));
+                collisions[subducting_owner].push_back(
+                    plateCollision(overriding_owner, x_mod, y_mod,
+                                   folded_crust + subducted_crust * 0.35f));
+                ++oceanic_collisions;
+                ++continental_collisions;
             }
         }
     }
@@ -1005,12 +1067,7 @@ void lithosphere::updateCollisions() {
             coll_ratio += (coll_ratio_j - coll_ratio) * (coll_ratio_j > coll_ratio);
 
             if ((coll_count > aggr_overlap_abs) | (coll_ratio > aggr_overlap_rel)) {
-                float amount = plates[i]->aggregateCrust(plates[coll.index], coll.wx, coll.wy);
-
-                // Calculate new direction and speed for the
-                // merged plate system, that is, for the
-                // receiving plate!
-                plates[coll.index]->collide(*plates[i], amount);
+                plates[coll.index]->collide(*plates[i], coll.crust);
             }
         }
 
@@ -1081,14 +1138,15 @@ uint32_t lithosphere::chooseDivergentOwner(uint32_t x, uint32_t y, uint32_t inde
             }
         }
 
-        const float owner_noise = scaled_octave_noise_4d(
-            4.0f, 0.58f, 0.085f, -1.0f, 1.0f,
-            static_cast<float>(x) + static_cast<float>(owner) * 13.0f + 17.0f,
-            static_cast<float>(y) + static_cast<float>(owner) * 7.0f + 29.0f,
-            static_cast<float>(iter_count) * 0.09f, static_cast<float>(owner) * 19.0f + 11.0f);
-        const float warp_noise = scaled_octave_noise_4d(
-            2.0f, 0.5f, 0.18f, -0.75f, 0.75f, static_cast<float>(x) * 0.75f + 5.0f,
-            static_cast<float>(y) * 0.75f + 13.0f, static_cast<float>(iter_count) * 0.05f,
+        const float owner_noise = sample_wrapped_octave_noise(
+            static_cast<float>(x), static_cast<float>(y), _worldDimension, 4.0f, 0.58f, 0.085f,
+            1.5f, -1.0f, 1.0f, static_cast<float>(owner) * 13.0f + 17.0f,
+            static_cast<float>(owner) * 7.0f + 29.0f, static_cast<float>(iter_count) * 0.09f,
+            static_cast<float>(owner) * 19.0f + 11.0f);
+        const float warp_noise = sample_wrapped_octave_noise(
+            static_cast<float>(x), static_cast<float>(y), _worldDimension, 2.0f, 0.5f, 0.18f,
+            2.2f, -0.75f, 0.75f, 5.0f, 13.0f,
+            static_cast<float>(iter_count) * 0.05f + static_cast<float>(owner) * 0.37f,
             static_cast<float>(owner) * 31.0f + 43.0f);
         score += owner_noise * 2.1f + warp_noise * 1.5f;
 
@@ -1238,6 +1296,8 @@ void lithosphere::regenerateCrust() {
         float drift_x = 0.0f;
         float drift_y = 0.0f;
         float drift_weight = 0.0f;
+        float oceanic_boundary_weight = 0.0f;
+        float continental_boundary_weight = 0.0f;
 
         for (BoundaryOwnerSample& sample : boundary_samples) {
             const float normal_length =
@@ -1259,6 +1319,13 @@ void lithosphere::regenerateCrust() {
                 owner_opening = sample.retreat;
             }
 
+            const float type_weight = sample.dir_weight * (0.35f + sample.retreat);
+            if (plates[sample.owner]->isOceanicPlate()) {
+                oceanic_boundary_weight += type_weight;
+            } else {
+                continental_boundary_weight += type_weight;
+            }
+
             const float weight = 0.2f + sample.retreat;
             drift_x += sample.velocity_x * weight;
             drift_y += sample.velocity_y * weight;
@@ -1270,37 +1337,32 @@ void lithosphere::regenerateCrust() {
             drift_y /= drift_weight;
         }
 
+        const float drift_magnitude = std::sqrt(drift_x * drift_x + drift_y * drift_y);
         const float owner_share =
             total_opening > FLT_EPSILON
                 ? owner_opening / total_opening
                 : (boundary_samples.empty() ? 1.0f : 1.0f / static_cast<float>(boundary_samples.size()));
         const float opening_strength = 1.0f - std::exp(-total_opening * 1.45f);
-
-        const float time_phase = static_cast<float>(iter_count);
-        const float advected_x = static_cast<float>(x) + drift_x * time_phase * 2.4f;
-        const float advected_y = static_cast<float>(y) + drift_y * time_phase * 2.4f;
-        const float owner_seed = static_cast<float>(imap[index]);
-
-        const float flow_macro = scaled_octave_noise_4d(
-            4.0f, 0.56f, 0.070f, -1.0f, 1.0f, advected_x * 0.72f + owner_seed * 13.0f + 17.0f,
-            advected_y * 0.72f + owner_seed * 7.0f + 29.0f, time_phase * 0.040f,
-            owner_seed * 19.0f + 43.0f);
-        const float flow_detail = scaled_octave_noise_4d(
-            5.0f, 0.53f, 0.115f, -1.0f, 1.0f,
-            advected_x * 1.35f + drift_y * 11.0f + owner_seed * 5.0f + 37.0f,
-            advected_y * 1.35f - drift_x * 11.0f + owner_seed * 3.0f + 53.0f,
-            time_phase * 0.026f, owner_seed * 23.0f + 71.0f);
-        const float flow_pulse = scaled_octave_noise_4d(
-            3.0f, 0.50f, 0.160f, 0.0f, 1.0f, advected_x * 0.48f + owner_seed * 29.0f + 11.0f,
-            advected_y * 0.48f + owner_seed * 31.0f + 19.0f,
-            time_phase * 0.022f + total_opening * 0.30f, owner_seed * 41.0f + 97.0f);
-
-        const float flow_bias = clamp_unit(0.5f + 0.25f * flow_macro + 0.18f * flow_detail);
-        const float coherent_strength =
-            clamp_unit(0.20f + 0.32f * owner_share + 0.34f * opening_strength + 0.24f * flow_bias);
-        const float ridge_bias = flow_pulse * opening_strength;
+        const float previous_height =
+            std::max(OCEANIC_BASE,
+                     prev_hmap[index] > 0.0f ? prev_hmap[index] : initial_hmap[index]);
+        const float random_signed = _randsource.next_float() * 2.0f - 1.0f;
+        const float relief_step =
+            divergent_carve_strength *
+            (0.85f + 0.25f * owner_share + 0.20f * opening_strength +
+             0.10f * std::min(1.5f, drift_magnitude) + 0.35f * random_signed);
+        const float boundary_weight_sum = oceanic_boundary_weight + continental_boundary_weight;
+        const float boundary_type_bias =
+            boundary_weight_sum > FLT_EPSILON
+                ? (oceanic_boundary_weight - continental_boundary_weight) / boundary_weight_sum
+                : 0.0f;
+        const float generated_candidate = previous_height + relief_step * boundary_type_bias;
+        const float min_generated =
+            boundary_type_bias >= 0.0f ? OCEANIC_BASE * 0.50f : OCEANIC_BASE * 0.10f;
+        const float max_generated =
+            boundary_type_bias > 0.0f ? CONTINENTAL_BASE - 0.05f : previous_height;
         const float generated_crust =
-            OCEANIC_BASE * (0.58f + 1.25f * coherent_strength + 0.55f * ridge_bias);
+            std::max(min_generated, std::min(max_generated, generated_candidate));
 
         hmap[index] = generated_crust;
         plates[imap[index]]->setCrust(x, y, generated_crust, iter_count);
@@ -1413,13 +1475,15 @@ void lithosphere::update() {
         // restart, because interesting stuff has most likely ended.
         if (totalVelocity < RESTART_SPEED_LIMIT ||
             systemKineticEnergy / peak_Ek < RESTART_ENERGY_RATIO ||
-            last_coll_count > NO_COLLISION_TIME_LIMIT || iter_count > RESTART_ITERATIONS) {
+            last_coll_count > NO_COLLISION_TIME_LIMIT ||
+            (cycle_step_limit > 0 && _steps > static_cast<int>(cycle_step_limit))) {
             restart();
             return;
         }
 
         const uint32_t map_area = _worldDimension.getArea();
         // Keep a copy of the previous index map
+        prev_hmap.copy(hmap);
         prev_imap.copy(imap);
         prev_display_hmap.copy(display_hmap);
 
@@ -1428,7 +1492,7 @@ void lithosphere::update() {
             plates[i]->resetSegments();
 
             if (erosion_period > 0 && _steps % erosion_period == 0)
-                plates[i]->erode(CONTINENTAL_BASE);
+                plates[i]->erode(CONTINENTAL_BASE, iter_count);
 
             plates[i]->move();
         }
@@ -1496,10 +1560,11 @@ void lithosphere::update() {
                     const float carry_ratio = 1.0f - static_cast<float>(crust_age) / 12.0f;
                     const uint32_t x = _worldDimension.xFromIndex(i);
                     const uint32_t y = _worldDimension.yFromIndex(i);
-                    const float flux_noise = scaled_octave_noise_4d(
-                        3.0f, 0.52f, 0.11f, -1.0f, 1.0f,
-                        static_cast<float>(x) * 0.65f + static_cast<float>(imap[i]) * 17.0f + 17.0f,
-                        static_cast<float>(y) * 0.65f + static_cast<float>(imap[i]) * 7.0f + 29.0f,
+                    const float flux_noise = sample_wrapped_octave_noise(
+                        static_cast<float>(x), static_cast<float>(y), _worldDimension, 3.0f,
+                        0.52f, 0.11f, 1.6f, -1.0f, 1.0f,
+                        static_cast<float>(imap[i]) * 17.0f + 17.0f,
+                        static_cast<float>(imap[i]) * 7.0f + 29.0f,
                         static_cast<float>(iter_count) * 0.045f,
                         static_cast<float>(imap[i]) * 19.0f + 11.0f);
                     const float flux_delta = flux_noise * (0.006f + 0.016f * carry_ratio);
@@ -1558,6 +1623,7 @@ void lithosphere::restart() {
                 }
             }
         }
+        prev_hmap = hmap;
         display_hmap = hmap;
         prev_display_hmap = display_hmap;
         initial_hmap = display_hmap;
@@ -1606,6 +1672,7 @@ void lithosphere::restart() {
             hmap[i] += isOceanic(hmap[i]) * BUOYANCY_BONUS_X * OCEANIC_BASE * crust_age *
                        MULINV_MAX_BUOYANCY_AGE;
         }
+        prev_hmap = hmap;
         display_hmap = hmap;
         prev_display_hmap = display_hmap;
     } catch (const exception& e) {

@@ -37,10 +37,12 @@ constexpr uint32_t kMinAggregationOverlapAbs = 64;
 constexpr uint32_t kAggregationOverlapAreaDivisor = 1000;
 constexpr float kAggrOverlapRel = 0.20f;
 constexpr uint32_t kDefaultCycleCount = 2;
+constexpr uint32_t kDefaultCycleStepLimit = 600;
 constexpr uint32_t kDefaultPlateCount = 10;
 constexpr float kDefaultRotationStrength = 1.0f;
 constexpr float kDefaultLandmassRotation = 0.20f;
 constexpr float kDefaultSubductionStrength = 1.0f;
+constexpr float kDefaultDivergentCarve = 0.015f;
 constexpr uint16_t kDefaultMinInitialHeight = TopographyCodec::kDefaultInitialMinHeightMeters;
 constexpr uint16_t kDefaultMaxInitialHeight = TopographyCodec::kDefaultInitialMaxHeightMeters;
 constexpr uint16_t kGifDelayCs = 8;
@@ -75,6 +77,7 @@ struct Params {
     bool delete_gif_frames;
     bool show_boundaries;
     uint32_t cycles;
+    uint32_t cycle_steps;
     uint32_t plates;
     uint32_t aggregation_overlap_abs;
     bool aggregation_overlap_abs_explicit;
@@ -85,6 +88,7 @@ struct Params {
     float rotation_strength;
     float landmass_rotation;
     float subduction_strength;
+    float divergent_carve;
     uint16_t min_initial_height_m;
     uint16_t max_initial_height_m;
     float display_min;
@@ -278,6 +282,8 @@ void print_help()
     printf(" --filename NAME     : deprecated; saved filenames now use timestamp + seed/input name\n");
     printf(" --cycles N          : number of simulation cycles to run (default %u)\n",
            kDefaultCycleCount);
+    printf(" --cycle-steps N     : max updates per cycle before restart; 0 disables (default %u)\n",
+           kDefaultCycleStepLimit);
     printf(" --plates N          : number of tectonic plates to initialize (default %u)\n",
            kDefaultPlateCount);
     printf(" --aggregation-overlap-abs N: overlap pixels needed to aggregate continents\n");
@@ -298,6 +304,8 @@ void print_help()
            kDefaultLandmassRotation);
     printf(" --subduction-strength X: scale oceanic crust removal during subduction in [0, 1]\n");
     printf("                       default %.2f\n", kDefaultSubductionStrength);
+    printf(" --divergent-carve X : downward carve per divergent regeneration step (default %.3f)\n",
+           kDefaultDivergentCarve);
     printf(" --step X            : save intermediate maps every X steps\n");
     printf(" --gif               : export an animated GIF using --step sampling, or every update if --step is omitted\n");
     printf(" --no-steps          : delete GIF frame PNGs after the GIF is created\n");
@@ -323,6 +331,7 @@ Params fill_params(int argc, char* argv[])
         false,
         false,
         kDefaultCycleCount,
+        kDefaultCycleStepLimit,
         kDefaultPlateCount,
         default_aggregation_overlap_abs(600, 400),
         false,
@@ -333,6 +342,7 @@ Params fill_params(int argc, char* argv[])
         kDefaultRotationStrength,
         kDefaultLandmassRotation,
         kDefaultSubductionStrength,
+        kDefaultDivergentCarve,
         kDefaultMinInitialHeight,
         kDefaultMaxInitialHeight,
         0.0f,
@@ -432,6 +442,12 @@ Params fill_params(int argc, char* argv[])
             }
             params.cycles = parse_u32("--cycles", argv[p + 1]);
             p += 2;
+        } else if (strcmp(argv[p], "--cycle-steps") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --cycle-steps");
+            }
+            params.cycle_steps = parse_nonnegative_u32("--cycle-steps", argv[p + 1]);
+            p += 2;
         } else if (strcmp(argv[p], "--plates") == 0) {
             if (p + 1 >= argc) {
                 fail("a parameter should follow --plates");
@@ -490,6 +506,13 @@ Params fill_params(int argc, char* argv[])
             }
             params.subduction_strength =
                 parse_unit_float("--subduction-strength", argv[p + 1]);
+            p += 2;
+        } else if (strcmp(argv[p], "--divergent-carve") == 0) {
+            if (p + 1 >= argc) {
+                fail("a parameter should follow --divergent-carve");
+            }
+            params.divergent_carve =
+                parse_nonnegative_float("--divergent-carve", argv[p + 1]);
             p += 2;
         } else if (strcmp(argv[p], "--step") == 0) {
             if (p + 1 >= argc) {
@@ -1267,7 +1290,8 @@ int main(int argc, char* argv[])
                                          params.erosion_strength, params.landmass_rotation,
                                          params.rotation_strength,
                                          params.subduction_strength, sea_level_override_m,
-                                         params.min_initial_height_m, params.max_initial_height_m);
+                                         params.min_initial_height_m, params.max_initial_height_m,
+                                         params.cycle_steps, params.divergent_carve);
 
     if (!input_heightmap.empty()) {
         platec_api_load_heightmap_raw(simulation, input_heightmap.data());
@@ -1299,6 +1323,7 @@ int main(int argc, char* argv[])
     printf(" height   : %u\n", params.height);
     printf(" preview  : %s\n", params.colors ? "colors" : "grayscale");
     printf(" cycles   : %u\n", params.cycles);
+    printf(" cyclemax : %u\n", params.cycle_steps);
     printf(" plates   : %u\n", params.plates);
     printf(" aggregate: abs %u, rel %.3f\n", params.aggregation_overlap_abs,
            params.aggregation_overlap_rel);
@@ -1308,6 +1333,7 @@ int main(int argc, char* argv[])
     printf(" rotation : motion %.2f, landmass %.2f\n", params.rotation_strength,
            params.landmass_rotation);
     printf(" subduct  : %.2f\n", params.subduction_strength);
+    printf(" diverge  : %.3f\n", params.divergent_carve);
     printf(" sea lvl  : %u m\n", active_sea_level_m);
     if (params.input_mode == InputMode::Procedural) {
         printf(" init rng : %u..%u m\n", static_cast<unsigned>(params.min_initial_height_m),

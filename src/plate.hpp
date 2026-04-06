@@ -32,9 +32,15 @@
 #include <cmath> // sin, cos
 #include <vector>
 
+enum class PlateType {
+    Oceanic,
+    Continental,
+};
+
 class IPlate : public IMass, public IMovement {
   public:
     ~IPlate() override = default;
+    virtual FloatPoint worldMassCenter() const = 0;
 };
 
 class plate : public IPlate {
@@ -129,7 +135,7 @@ class plate : public IPlate {
     /// Plates total mass and the center of mass are updated.
     ///
     /// @param  lower_bound Sets limit below which there's no erosion.
-    void erode(float lower_bound);
+    void erode(float lower_bound, uint32_t current_iteration = 0);
 
     /// Retrieve collision statistics of continent at given location.
     ///
@@ -223,8 +229,20 @@ class plate : public IPlate {
     Platec::FloatVector linearVelocityVector() const {
         return _movement.velocityVector();
     }
-    FloatPoint worldMassCenter() const;
+    FloatPoint worldMassCenter() const override;
     Platec::FloatVector surfaceVelocityAt(uint32_t x, uint32_t y) const;
+    PlateType plateType() const noexcept {
+        return _plate_type;
+    }
+    bool isOceanicPlate() const noexcept {
+        return _plate_type == PlateType::Oceanic;
+    }
+    bool isContinentalPlate() const noexcept {
+        return _plate_type == PlateType::Continental;
+    }
+    float buoyancy() const noexcept {
+        return _buoyancy;
+    }
 
     Platec::FloatVector velocityUnitVector() const override {
         return _movement.velocityUnitVector();
@@ -291,7 +309,8 @@ class plate : public IPlate {
     void ensureRotationPadding(uint32_t margin);
     void rotateCrust(float angle);
     void findRiverSources(float lower_bound, vector<uint32_t>* sources);
-    void flowRivers(float lower_bound, vector<uint32_t>* sources, HeightMap& tmp);
+    void flowRivers(float lower_bound, const std::vector<float>& river_strength,
+                    vector<uint32_t>* sources, HeightMap& tmp);
     uint32_t createSegment(uint32_t x, uint32_t y) throw();
 
     const WorldDimension _worldDimension;
@@ -301,6 +320,8 @@ class plate : public IPlate {
     IBounds* _bounds;
     Mass _mass;
     Movement _movement;
+    PlateType _plate_type;
+    float _buoyancy;
     float _erosion_strength;
     float _crust_rotation_strength;
     float _pending_crust_rotation;
